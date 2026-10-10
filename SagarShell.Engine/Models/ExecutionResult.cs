@@ -22,6 +22,11 @@ public class ExecutionResult
     public List<object>? StructuredObjects { get; set; } = new();
 
     /// <summary>
+    /// Intelligent plain-English diagnosis if execution failed.
+    /// </summary>
+    public SagarShell.Engine.Diagnosis.ErrorDiagnosis? Diagnosis { get; set; }
+
+    /// <summary>
     /// Indicates whether execution ran in-process via Runspace or via fallback process.
     /// </summary>
     public string ExecutionMode { get; set; } = "InProcessRunspace";

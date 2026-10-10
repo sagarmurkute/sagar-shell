@@ -172,11 +172,62 @@ public static class Program
                 Console.ResetColor();
             }
 
-            if (!result.Success && !string.IsNullOrEmpty(result.StandardError))
+            if (!result.Success)
             {
-                Console.ForegroundColor = ConsoleColor.Red;
-                Console.WriteLine($"[Error] {result.StandardError}");
-                Console.ResetColor();
+                if (!string.IsNullOrEmpty(result.StandardError))
+                {
+                    Console.ForegroundColor = ConsoleColor.Red;
+                    Console.WriteLine($"[Error] {result.StandardError}");
+                    Console.ResetColor();
+                }
+
+                if (result.Diagnosis != null)
+                {
+                    Console.ForegroundColor = ConsoleColor.Yellow;
+                    Console.WriteLine($"\n🔍 [Diagnosis: {result.Diagnosis.Category}]");
+                    Console.ForegroundColor = ConsoleColor.White;
+                    Console.WriteLine($"   • {result.Diagnosis.PlainEnglishSummary}");
+                    Console.ForegroundColor = ConsoleColor.Gray;
+                    Console.WriteLine($"   • Likely Cause: {result.Diagnosis.LikelyCause}");
+                    Console.ResetColor();
+
+                    if (result.Diagnosis.CanBeRemediated)
+                    {
+                        var fix = result.Diagnosis.SuggestedFix!;
+                        Console.ForegroundColor = ConsoleColor.Cyan;
+                        Console.WriteLine($"\n💡 Suggested Fix: {fix.Description}");
+                        if (!string.IsNullOrEmpty(fix.RemediationScript))
+                        {
+                            Console.ForegroundColor = ConsoleColor.DarkCyan;
+                            Console.WriteLine($"   Command: {fix.RemediationScript}");
+                        }
+                        Console.ResetColor();
+
+                        Console.ForegroundColor = ConsoleColor.Yellow;
+                        Console.Write("   Apply suggested fix & retry? (y/N): ");
+                        Console.ResetColor();
+                        var fixChoice = Console.ReadLine()?.Trim().ToLowerInvariant();
+
+                        if (fixChoice == "y" || fixChoice == "yes")
+                        {
+                            var recoveryManager = new SagarShell.Engine.Diagnosis.RecoveryManager();
+                            var recovery = await recoveryManager.ApplyRecoveryAsync(
+                                result.Diagnosis,
+                                executor,
+                                context,
+                                approvalPrompt: _ => Task.FromResult(true));
+
+                            Console.ForegroundColor = recovery.RetrySucceeded || recovery.RemediationSucceeded ? ConsoleColor.Green : ConsoleColor.Red;
+                            Console.WriteLine($"\n[Recovery] {recovery.SummaryMessage}");
+                            if (recovery.RetryOutput != null && !string.IsNullOrEmpty(recovery.RetryOutput.StandardOutput))
+                            {
+                                Console.ForegroundColor = ConsoleColor.Gray;
+                                Console.WriteLine(recovery.RetryOutput.StandardOutput);
+                            }
+                            Console.ResetColor();
+                        }
+                    }
+                }
             }
 
             Console.ForegroundColor = ConsoleColor.DarkGray;

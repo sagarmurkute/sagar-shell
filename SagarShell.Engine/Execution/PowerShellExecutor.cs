@@ -39,12 +39,17 @@ public class PowerShellExecutor : IShellExecutor
             {
                 sw.Stop();
                 var fail = ExecutionResult.CreateFailure(ex.Message, 1, sw.Elapsed);
+                fail.Diagnosis = SagarShell.Engine.Diagnosis.ErrorDiagnoser.Diagnose(fail, translation, context);
                 context.AddHistory(translation.OriginalInput, translation, fail);
                 return fail;
             }
         }
 
         var execResult = await ExecuteScriptAsync(translation.PowerShellScript, context, cancellationToken);
+        if (!execResult.Success)
+        {
+            execResult.Diagnosis = SagarShell.Engine.Diagnosis.ErrorDiagnoser.Diagnose(execResult, translation, context);
+        }
         context.AddHistory(translation.OriginalInput, translation, execResult);
         return execResult;
     }
@@ -127,18 +132,24 @@ Write-Output ""__SAGAR_SHELL_PWD_MARKER__:$((Get-Location).Path)""
             }
             else
             {
-                return ExecutionResult.CreateFailure(errStr.Length > 0 ? errStr : outStr, process.ExitCode, sw.Elapsed, outStr);
+                var fail = ExecutionResult.CreateFailure(errStr.Length > 0 ? errStr : outStr, process.ExitCode, sw.Elapsed, outStr);
+                fail.Diagnosis = SagarShell.Engine.Diagnosis.ErrorDiagnoser.Diagnose(fail, null, context);
+                return fail;
             }
         }
         catch (OperationCanceledException)
         {
             sw.Stop();
-            return ExecutionResult.CreateFailure("Operation timed out or was cancelled by user.", -1, sw.Elapsed);
+            var fail = ExecutionResult.CreateFailure("Operation timed out or was cancelled by user.", -1, sw.Elapsed);
+            fail.Diagnosis = SagarShell.Engine.Diagnosis.ErrorDiagnoser.Diagnose(fail, null, context);
+            return fail;
         }
         catch (Exception ex)
         {
             sw.Stop();
-            return ExecutionResult.CreateFailure($"Process execution error: {ex.Message}", -1, sw.Elapsed);
+            var fail = ExecutionResult.CreateFailure($"Process execution error: {ex.Message}", -1, sw.Elapsed);
+            fail.Diagnosis = SagarShell.Engine.Diagnosis.ErrorDiagnoser.Diagnose(fail, null, context);
+            return fail;
         }
     }
 }

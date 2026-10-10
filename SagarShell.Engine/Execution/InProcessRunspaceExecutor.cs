@@ -73,6 +73,10 @@ public class InProcessRunspaceExecutor : IShellExecutor, IDisposable, IAsyncDisp
         }
 
         var execResult = await ExecuteScriptAsync(translation.PowerShellScript, context, cancellationToken);
+        if (!execResult.Success)
+        {
+            execResult.Diagnosis = SagarShell.Engine.Diagnosis.ErrorDiagnoser.Diagnose(execResult, translation, context);
+        }
         context.AddHistory(translation.OriginalInput, translation, execResult);
         return execResult;
     }
@@ -173,24 +177,30 @@ public class InProcessRunspaceExecutor : IShellExecutor, IDisposable, IAsyncDisp
                     stderr = string.Join(Environment.NewLine, ps.Streams.Error.Select(e => e.ToString()));
                 }
 
-                return ExecutionResult.CreateFailure(
+                var fail = ExecutionResult.CreateFailure(
                     string.IsNullOrEmpty(stderr) ? "Error occurred during script execution." : stderr,
                     1,
                     sw.Elapsed,
                     stdout,
                     "InProcessRunspace"
                 );
+                fail.Diagnosis = SagarShell.Engine.Diagnosis.ErrorDiagnoser.Diagnose(fail, null, context);
+                return fail;
             }
         }
         catch (OperationCanceledException)
         {
             sw.Stop();
-            return ExecutionResult.CreateFailure("Operation timed out or was cancelled by user.", -1, sw.Elapsed, executionMode: "InProcessRunspace");
+            var fail = ExecutionResult.CreateFailure("Operation timed out or was cancelled by user.", -1, sw.Elapsed, executionMode: "InProcessRunspace");
+            fail.Diagnosis = SagarShell.Engine.Diagnosis.ErrorDiagnoser.Diagnose(fail, null, context);
+            return fail;
         }
         catch (Exception ex)
         {
             sw.Stop();
-            return ExecutionResult.CreateFailure($"Runspace execution error: {ex.Message}", -1, sw.Elapsed, executionMode: "InProcessRunspace");
+            var fail = ExecutionResult.CreateFailure($"Runspace execution error: {ex.Message}", -1, sw.Elapsed, executionMode: "InProcessRunspace");
+            fail.Diagnosis = SagarShell.Engine.Diagnosis.ErrorDiagnoser.Diagnose(fail, null, context);
+            return fail;
         }
         finally
         {
