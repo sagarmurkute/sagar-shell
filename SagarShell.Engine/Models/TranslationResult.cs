@@ -23,6 +23,12 @@ public class TranslationResult
     public bool IsDryRun { get; set; }
 
     /// <summary>
+    /// Clarification request when intent is ambiguous or requires user disambiguation.
+    /// </summary>
+    public SagarShell.Engine.Intelligence.ClarificationRequest? Clarification { get; set; }
+    public bool NeedsClarification => Clarification != null;
+
+    /// <summary>
     /// Direct in-memory C# action delegate for zero-latency execution if applicable.
     /// </summary>
     public Func<ShellContext, ExecutionResult>? DirectNativeAction { get; set; }

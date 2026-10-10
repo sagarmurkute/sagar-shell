@@ -129,8 +129,56 @@ public static class Program
 
             var translation = await engine.TranslateAsync(request);
 
-            // Display translation breakdown
-            PrintTranslationSummary(translation);
+            // Handle interactive clarification if input is ambiguous
+            if (translation.NeedsClarification && translation.Clarification != null)
+            {
+                var clar = translation.Clarification;
+                Console.ForegroundColor = ConsoleColor.Cyan;
+                Console.WriteLine($"\n🤔 {clar.Question}");
+                Console.ResetColor();
+
+                for (int i = 0; i < clar.Options.Count; i++)
+                {
+                    var opt = clar.Options[i];
+                    Console.ForegroundColor = ConsoleColor.Yellow;
+                    Console.Write($"  [{opt.Index}] ");
+                    Console.ForegroundColor = ConsoleColor.White;
+                    Console.Write($"{opt.Label}: ");
+                    Console.ForegroundColor = ConsoleColor.DarkGray;
+                    Console.WriteLine($"{opt.Description}");
+                    Console.ResetColor();
+                }
+
+                Console.ForegroundColor = ConsoleColor.Cyan;
+                Console.Write($"\nSelect an option [1-{clar.Options.Count}] or press Enter to cancel: ");
+                Console.ResetColor();
+                var choiceStr = Console.ReadLine()?.Trim();
+                if (int.TryParse(choiceStr, out int choice) && choice >= 1 && choice <= clar.Options.Count)
+                {
+                    var selectedOpt = clar.Options[choice - 1];
+                    translation = TranslationResult.CreateSuccess(
+                        selectedOpt.Label,
+                        selectedOpt.PowerShellScript,
+                        selectedOpt.Description,
+                        selectedOpt.Risk,
+                        selectedOpt.Category
+                    );
+                    translation.RequiresElevation = selectedOpt.RequiresElevation;
+                    PrintTranslationSummary(translation);
+                }
+                else
+                {
+                    Console.ForegroundColor = ConsoleColor.DarkYellow;
+                    Console.WriteLine("Clarification cancelled.");
+                    Console.ResetColor();
+                    continue;
+                }
+            }
+            else
+            {
+                // Display translation breakdown
+                PrintTranslationSummary(translation);
+            }
 
             // If empty or unrecognized
             if (string.IsNullOrWhiteSpace(translation.PowerShellScript))

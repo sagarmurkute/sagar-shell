@@ -73,7 +73,25 @@ public class NaturalLanguageEngine : ITranslationEngine
         var sanitized = NaturalTextSanitizer.Sanitize(rawInput);
         var context = request.Context ?? new ShellContext();
 
-        // 1. Check Pronouns and Pipeline Continuations if context has prior history
+        // 1. Check Ambiguity and Intent Clarification
+        if (AmbiguityDetector.IsAmbiguous(sanitized, context))
+        {
+            var clarification = AmbiguityDetector.DetectAmbiguity(sanitized, context);
+            if (clarification != null)
+            {
+                var ambigResult = TranslationResult.CreateSuccess(
+                    rawInput,
+                    "",
+                    clarification.Question,
+                    RiskLevel.Safe,
+                    IntentCategory.GeneralQuery
+                );
+                ambigResult.Clarification = clarification;
+                return ambigResult;
+            }
+        }
+
+        // 2. Check Pronouns and Pipeline Continuations if context has prior history
         if (PronounResolver.ContainsPronounOrContinuation(sanitized) && context.History.Count > 0)
         {
             var followUpResult = PronounResolver.TryResolveFollowUp(sanitized, context);
@@ -84,7 +102,7 @@ public class NaturalLanguageEngine : ITranslationEngine
             }
         }
 
-        // 2. High-speed Deterministic Pattern Matchers
+        // 3. High-speed Deterministic Pattern Matchers
         foreach (var pattern in _patterns)
         {
             if (pattern.CanHandle(sanitized, context))
@@ -95,18 +113,22 @@ public class NaturalLanguageEngine : ITranslationEngine
             }
         }
 
-        // 3. AI / LLM Provider Translation
+        // 4. AI / LLM Provider Translation with strict AST & Safety Validation
         if (_aiProvider.IsAvailable)
         {
             var aiResult = await _aiProvider.TranslateAsync(sanitized, context, cancellationToken);
             if (aiResult != null && !string.IsNullOrWhiteSpace(aiResult.PowerShellScript))
             {
-                EnrichAndAnalyzeSafety(aiResult, request);
-                return aiResult;
+                var validation = AIOutputValidator.ValidateTranslation(aiResult, context);
+                if (validation.IsValid && validation.ValidatedTranslation != null)
+                {
+                    EnrichAndAnalyzeSafety(validation.ValidatedTranslation, request);
+                    return validation.ValidatedTranslation;
+                }
             }
         }
 
-        // 4. Rule-based Fallback Slot Resolver
+        // 5. Rule-based Fallback Slot Resolver
         var fallbackResult = await _fallbackProvider.TranslateAsync(sanitized, context, cancellationToken);
         if (fallbackResult != null && !string.IsNullOrWhiteSpace(fallbackResult.PowerShellScript))
         {
