@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="SagarShell.Engine.Cli/SagarShell.Engine.Cli.csproj" />
+  <Project Path="SagarShell.Engine.Tests/SagarShell.Engine.Tests.csproj" />
+  <Project Path="SagarShell.Engine/SagarShell.Engine.csproj" />
+</Solution>

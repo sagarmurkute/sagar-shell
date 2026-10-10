@@ -1,0 +1,11 @@
+## Visual Studio / .NET Core gitignore
+[Bb]in/
+[Oo]bj/
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+.idea/
+*.log
+.system_generated/
