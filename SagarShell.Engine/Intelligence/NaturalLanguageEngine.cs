@@ -112,14 +112,18 @@ public class NaturalLanguageEngine : ITranslationEngine
             var clarification = AmbiguityDetector.DetectAmbiguity(sanitized, context);
             if (clarification != null)
             {
+                context.ActiveClarification = clarification;
                 var ambigResult = TranslationResult.CreateSuccess(
                     rawInput,
                     "",
                     clarification.Question,
                     RiskLevel.Safe,
-                    IntentCategory.GeneralQuery
+                    IntentCategory.GeneralQuery,
+                    confidence: clarification.OriginalConfidence
                 );
                 ambigResult.Clarification = clarification;
+                ambigResult.IsConversationalResponse = true;
+                ambigResult.ConversationalMessage = clarification.Question;
                 return ambigResult;
             }
         }
@@ -166,8 +170,11 @@ public class NaturalLanguageEngine : ITranslationEngine
             return fallbackResult;
         }
 
-        // 8. Unknown
-        return TranslationResult.CreateUnknown(rawInput, $"Unable to unambiguously resolve '{rawInput}' into a safe Windows command.");
+        // 8. Unknown / Low Confidence Fallback - Ask natural clarifying question
+        var unknownResult = TranslationResult.CreateUnknown(rawInput, $"Unable to unambiguously resolve '{rawInput}' into a safe Windows command.");
+        unknownResult.ConversationalMessage = $"I'm not sure what you mean by '{rawInput}'. Could you specify which file, folder, process, or action you would like to run?";
+        unknownResult.IsConversationalResponse = true;
+        return unknownResult;
     }
 
     private static void EnrichAndAnalyzeSafety(TranslationResult result, TranslationRequest request)

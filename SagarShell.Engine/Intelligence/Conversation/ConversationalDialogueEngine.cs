@@ -57,6 +57,10 @@ public static class ConversationalDialogueEngine
         var raw = input.Trim().ToLowerInvariant();
         var clean = NaturalTextSanitizer.Sanitize(input).Trim();
 
+        // 0. Check if an active clarification request is waiting for user choice
+        if (context.ActiveClarification != null)
+            return true;
+
         // 1. Check if an active proposal is pending and user is answering
         if (context.ActiveProposal != null && (AffirmationRegex.IsMatch(raw) || AffirmationRegex.IsMatch(clean) || RejectionRegex.IsMatch(raw) || RejectionRegex.IsMatch(clean)))
             return true;
@@ -89,10 +93,16 @@ public static class ConversationalDialogueEngine
     /// </summary>
     public static TranslationResult? TryProcessConversation(string input, ShellContext context)
     {
-        if (string.IsNullOrWhiteSpace(input)) return null;
-
         var raw = input.Trim().ToLowerInvariant();
         var clean = NaturalTextSanitizer.Sanitize(input).Trim();
+
+        // 0. Handle Active Clarification Resolution
+        if (context.ActiveClarification != null)
+        {
+            var clarResult = ClarificationEngine.ResolveClarification(input, context);
+            if (clarResult != null)
+                return clarResult;
+        }
 
         // 1. Handle Affirmation / Rejection of Pending Proposal
         if (context.ActiveProposal != null)

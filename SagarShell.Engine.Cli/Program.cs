@@ -122,8 +122,33 @@ public static class Program
 
             var translation = await engine.TranslateAsync(request);
 
-            // Handle conversational turn responses
-            if (translation.IsConversationalResponse)
+            // Handle clarification or conversational turn responses
+            if (translation.NeedsClarification && translation.Clarification != null)
+            {
+                var clar = translation.Clarification;
+                TerminalRenderer.RenderClarification(clar);
+
+                AnsiConsole.Markup($"[bold cyan]Select an option [[1-{clar.Options.Count}]] or type your choice (press Enter to cancel):[/] ");
+                var choiceStr = Console.ReadLine()?.Trim();
+                if (string.IsNullOrWhiteSpace(choiceStr) || choiceStr.Equals("cancel", StringComparison.OrdinalIgnoreCase))
+                {
+                    context.ActiveClarification = null;
+                    AnsiConsole.MarkupLine("[bold darkorange]Clarification cancelled.[/]");
+                    continue;
+                }
+
+                // Resolve user choice with ClarificationEngine
+                translation = ClarificationEngine.ResolveClarification(choiceStr, context);
+                if (translation.IsConversationalResponse)
+                {
+                    TerminalRenderer.RenderConversationalResponse(translation);
+                }
+                else
+                {
+                    TerminalRenderer.RenderTranslationSummary(translation);
+                }
+            }
+            else if (translation.IsConversationalResponse)
             {
                 TerminalRenderer.RenderConversationalResponse(translation);
 
@@ -131,32 +156,6 @@ public static class Program
                 if (translation.IsPendingProposal)
                 {
                     context.RecordTurn(trimmed, translation, null);
-                    continue;
-                }
-            }
-            else if (translation.NeedsClarification && translation.Clarification != null)
-            {
-                var clar = translation.Clarification;
-                TerminalRenderer.RenderClarification(clar);
-
-                AnsiConsole.Markup($"[bold cyan]Select an option [[1-{clar.Options.Count}]] or press Enter to cancel:[/] ");
-                var choiceStr = Console.ReadLine()?.Trim();
-                if (int.TryParse(choiceStr, out int choice) && choice >= 1 && choice <= clar.Options.Count)
-                {
-                    var selectedOpt = clar.Options[choice - 1];
-                    translation = TranslationResult.CreateSuccess(
-                        selectedOpt.Label,
-                        selectedOpt.PowerShellScript,
-                        selectedOpt.Description,
-                        selectedOpt.Risk,
-                        selectedOpt.Category
-                    );
-                    translation.RequiresElevation = selectedOpt.RequiresElevation;
-                    TerminalRenderer.RenderTranslationSummary(translation);
-                }
-                else
-                {
-                    AnsiConsole.MarkupLine("[bold darkorange]Clarification cancelled.[/]");
                     continue;
                 }
             }

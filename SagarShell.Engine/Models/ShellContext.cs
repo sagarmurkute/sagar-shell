@@ -83,6 +83,16 @@ public class ShellContext
     public TranslationResult? ActiveProposal { get; set; }
 
     /// <summary>
+    /// The active clarification request waiting for user disambiguation or option selection.
+    /// </summary>
+    public SagarShell.Engine.Intelligence.ClarificationRequest? ActiveClarification { get; set; }
+
+    /// <summary>
+    /// Confidence threshold below which commands are clarified rather than executed blindly (default 0.75).
+    /// </summary>
+    public double ConfidenceThreshold { get; set; } = 0.75;
+
+    /// <summary>
     /// Active high-level diagnostic or operational goal (e.g. "Diagnosing system slowdown").
     /// </summary>
     public string? ActiveGoal { get; set; }
