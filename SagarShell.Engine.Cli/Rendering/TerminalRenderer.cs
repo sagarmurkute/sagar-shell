@@ -50,6 +50,30 @@ public static class TerminalRenderer
         AnsiConsole.WriteLine();
     }
 
+    public static void RenderConversationalResponse(TranslationResult result)
+    {
+        if (result == null || string.IsNullOrWhiteSpace(result.ConversationalMessage)) return;
+
+        var message = result.ConversationalMessage;
+        var panel = new Panel(new Markup($"[bold cyan]🤖 Sagar Shell:[/] [white]{Markup.Escape(message)}[/]"))
+        {
+            Border = BoxBorder.Rounded,
+            BorderStyle = new Style(Color.Cyan1)
+        };
+
+        AnsiConsole.Write(panel);
+
+        if (result.RequiresExplicitConfirmation && !string.IsNullOrWhiteSpace(result.ImpactExplanation))
+        {
+            var impactPanel = new Panel(new Markup($"[bold yellow]⚠️ Impact:[/] [white]{Markup.Escape(result.ImpactExplanation)}[/]"))
+            {
+                Border = BoxBorder.Rounded,
+                BorderStyle = new Style(Color.Yellow)
+            };
+            AnsiConsole.Write(impactPanel);
+        }
+    }
+
     public static void RenderTranslationSummary(TranslationResult translation)
     {
         if (translation == null) return;

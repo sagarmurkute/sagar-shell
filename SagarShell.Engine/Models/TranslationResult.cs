@@ -29,9 +29,59 @@ public class TranslationResult
     public bool NeedsClarification => Clarification != null;
 
     /// <summary>
+    /// Indicates whether the response is conversational (e.g. proposing an action, explaining results, or asking for input).
+    /// </summary>
+    public bool IsConversationalResponse { get; set; }
+
+    /// <summary>
+    /// Conversational message or question to display directly to the user.
+    /// </summary>
+    public string? ConversationalMessage { get; set; }
+
+    /// <summary>
+    /// Indicates whether a proposed action is waiting for user affirmation ("Yes" / "Do it").
+    /// </summary>
+    public bool IsPendingProposal => PendingProposal != null;
+
+    /// <summary>
+    /// The action proposed by the assistant awaiting user confirmation.
+    /// </summary>
+    public TranslationResult? PendingProposal { get; set; }
+
+    /// <summary>
+    /// When true, explicit confirmation with impact explanation is required before execution.
+    /// </summary>
+    public bool RequiresExplicitConfirmation { get; set; }
+
+    /// <summary>
+    /// Plain-English explanation of real-world system impact (e.g. "Will terminate Chrome PID 14200 closing 12 tabs").
+    /// </summary>
+    public string? ImpactExplanation { get; set; }
+
+    /// <summary>
     /// Direct in-memory C# action delegate for zero-latency execution if applicable.
     /// </summary>
     public Func<ShellContext, ExecutionResult>? DirectNativeAction { get; set; }
+
+    public static TranslationResult CreateConversational(
+        string originalInput, 
+        string message, 
+        TranslationResult? proposedAction = null,
+        IntentCategory category = IntentCategory.GeneralQuery)
+    {
+        return new TranslationResult
+        {
+            OriginalInput = originalInput,
+            PowerShellScript = proposedAction?.PowerShellScript ?? string.Empty,
+            Explanation = message,
+            ConversationalMessage = message,
+            IsConversationalResponse = true,
+            PendingProposal = proposedAction,
+            Category = category,
+            Risk = proposedAction?.Risk ?? RiskLevel.Safe,
+            Confidence = 1.0
+        };
+    }
 
     public static TranslationResult CreateSuccess(
         string originalInput,

@@ -72,6 +72,21 @@ public class ShellContext
     /// </summary>
     public List<System.Management.Automation.PSObject> LastOutputObjects { get; set; } = new();
 
+    /// <summary>
+    /// Multi-turn conversation turns preserved within the active session.
+    /// </summary>
+    public List<ConversationTurn> ConversationTurns { get; set; } = new();
+
+    /// <summary>
+    /// The pending proposed action waiting for user affirmation ("Yes" / "Do it").
+    /// </summary>
+    public TranslationResult? ActiveProposal { get; set; }
+
+    /// <summary>
+    /// Active high-level diagnostic or operational goal (e.g. "Diagnosing system slowdown").
+    /// </summary>
+    public string? ActiveGoal { get; set; }
+
     public void AddHistory(string rawInput, TranslationResult translation, ExecutionResult? execution = null)
     {
         History.Add(new CommandHistoryEntry
@@ -81,6 +96,9 @@ public class ShellContext
             Translation = translation,
             Execution = execution
         });
+
+        // Record conversational turn
+        RecordTurn(rawInput, translation, execution);
 
         // Update memory
         Memory.UpdateFrom(translation, execution);
@@ -92,6 +110,22 @@ public class ShellContext
                 .OfType<System.Management.Automation.PSObject>()
                 .ToList();
         }
+    }
+
+    public void RecordTurn(string userMessage, TranslationResult translation, ExecutionResult? execution = null)
+    {
+        var turn = new ConversationTurn
+        {
+            TurnIndex = ConversationTurns.Count + 1,
+            Timestamp = DateTime.UtcNow,
+            UserMessage = userMessage,
+            AssistantResponse = translation.ConversationalMessage ?? translation.Explanation,
+            IntentGoal = ActiveGoal,
+            Translation = translation,
+            Execution = execution
+        };
+
+        ConversationTurns.Add(turn);
     }
 }
 

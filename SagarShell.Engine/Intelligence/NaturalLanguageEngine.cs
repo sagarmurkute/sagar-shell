@@ -73,7 +73,40 @@ public class NaturalLanguageEngine : ITranslationEngine
         var sanitized = NaturalTextSanitizer.Sanitize(rawInput);
         var context = request.Context ?? new ShellContext();
 
-        // 1. Check Ambiguity and Intent Clarification
+        // 1. Context-Aware Multi-Turn Conversational Dialogue Reasoning
+        if (SagarShell.Engine.Intelligence.Conversation.ConversationalDialogueEngine.IsConversationalTurn(sanitized, context))
+        {
+            var convResult = SagarShell.Engine.Intelligence.Conversation.ConversationalDialogueEngine.TryProcessConversation(sanitized, context);
+            if (convResult != null)
+            {
+                EnrichAndAnalyzeSafety(convResult, request);
+                return convResult;
+            }
+        }
+
+        // 2. AI / LLM Provider Translation with Conversational Context & AST Validation
+        if (_aiProvider.IsAvailable && _aiProvider != _fallbackProvider)
+        {
+            var aiResult = await _aiProvider.TranslateAsync(sanitized, context, cancellationToken);
+            if (aiResult != null && (!string.IsNullOrWhiteSpace(aiResult.PowerShellScript) || aiResult.IsConversationalResponse))
+            {
+                if (!string.IsNullOrWhiteSpace(aiResult.PowerShellScript))
+                {
+                    var validation = AIOutputValidator.ValidateTranslation(aiResult, context);
+                    if (validation.IsValid && validation.ValidatedTranslation != null)
+                    {
+                        EnrichAndAnalyzeSafety(validation.ValidatedTranslation, request);
+                        return validation.ValidatedTranslation;
+                    }
+                }
+                else
+                {
+                    return aiResult;
+                }
+            }
+        }
+
+        // 3. Check Ambiguity and Intent Clarification
         if (AmbiguityDetector.IsAmbiguous(sanitized, context))
         {
             var clarification = AmbiguityDetector.DetectAmbiguity(sanitized, context);
@@ -91,7 +124,7 @@ public class NaturalLanguageEngine : ITranslationEngine
             }
         }
 
-        // 2. Check Pronouns and Pipeline Continuations if context has prior history
+        // 4. Check Pronouns and Pipeline Continuations if context has prior history
         if (PronounResolver.ContainsPronounOrContinuation(sanitized) && context.History.Count > 0)
         {
             var followUpResult = PronounResolver.TryResolveFollowUp(sanitized, context);
@@ -102,7 +135,7 @@ public class NaturalLanguageEngine : ITranslationEngine
             }
         }
 
-        // 3. High-speed Deterministic Pattern Matchers
+        // 5. High-speed Deterministic Pattern Matchers
         foreach (var pattern in _patterns)
         {
             if (pattern.CanHandle(sanitized, context))
@@ -113,22 +146,7 @@ public class NaturalLanguageEngine : ITranslationEngine
             }
         }
 
-        // 4. AI / LLM Provider Translation with strict AST & Safety Validation
-        if (_aiProvider.IsAvailable)
-        {
-            var aiResult = await _aiProvider.TranslateAsync(sanitized, context, cancellationToken);
-            if (aiResult != null && !string.IsNullOrWhiteSpace(aiResult.PowerShellScript))
-            {
-                var validation = AIOutputValidator.ValidateTranslation(aiResult, context);
-                if (validation.IsValid && validation.ValidatedTranslation != null)
-                {
-                    EnrichAndAnalyzeSafety(validation.ValidatedTranslation, request);
-                    return validation.ValidatedTranslation;
-                }
-            }
-        }
-
-        // 5. Rule-based Fallback Slot Resolver
+        // 6. Rule-based Fallback Slot Resolver
         var fallbackResult = await _fallbackProvider.TranslateAsync(sanitized, context, cancellationToken);
         if (fallbackResult != null && !string.IsNullOrWhiteSpace(fallbackResult.PowerShellScript))
         {
@@ -136,7 +154,7 @@ public class NaturalLanguageEngine : ITranslationEngine
             return fallbackResult;
         }
 
-        // 5. Unknown
+        // 7. Unknown
         return TranslationResult.CreateUnknown(rawInput, $"Unable to unambiguously resolve '{rawInput}' into a safe Windows command.");
     }
 

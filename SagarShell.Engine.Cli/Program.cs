@@ -122,8 +122,19 @@ public static class Program
 
             var translation = await engine.TranslateAsync(request);
 
-            // Handle interactive clarification if input is ambiguous
-            if (translation.NeedsClarification && translation.Clarification != null)
+            // Handle conversational turn responses
+            if (translation.IsConversationalResponse)
+            {
+                TerminalRenderer.RenderConversationalResponse(translation);
+
+                // If this is a pending proposal awaiting user answer, wait for next user input
+                if (translation.IsPendingProposal)
+                {
+                    context.RecordTurn(trimmed, translation, null);
+                    continue;
+                }
+            }
+            else if (translation.NeedsClarification && translation.Clarification != null)
             {
                 var clar = translation.Clarification;
                 TerminalRenderer.RenderClarification(clar);
@@ -154,14 +165,25 @@ public static class Program
                 TerminalRenderer.RenderTranslationSummary(translation);
             }
 
-            // If empty or unrecognized
+            // If empty or unrecognized command
             if (string.IsNullOrWhiteSpace(translation.PowerShellScript))
             {
+                context.RecordTurn(trimmed, translation, null);
                 continue;
             }
 
-            // Safety prompt for High / Critical risk operations
-            if (translation.Risk == RiskLevel.Critical && !isDryRun)
+            // Explicit confirmation prompt with impact explanation
+            if (translation.RequiresExplicitConfirmation)
+            {
+                var confirm = AnsiConsole.Confirm("[bold yellow]⚡ Do you want to proceed with this action?[/]", defaultValue: false);
+                if (!confirm)
+                {
+                    AnsiConsole.MarkupLine("[bold darkorange]Action cancelled by user.[/]");
+                    continue;
+                }
+            }
+            // Safety prompt for Critical risk operations
+            else if (translation.Risk == RiskLevel.Critical && !isDryRun)
             {
                 var confirm = AnsiConsole.Confirm("[bold red]⚠️ CRITICAL OPERATION: Are you sure you want to execute this?[/]", defaultValue: false);
                 if (!confirm)
