@@ -13,10 +13,10 @@ public static class Program
     {
         Console.OutputEncoding = System.Text.Encoding.UTF8;
         var engine = new NaturalLanguageEngine();
-        var executor = new PowerShellExecutor();
+        using var executor = new ShellRuntimeManager(Directory.GetCurrentDirectory());
         var context = new ShellContext(Directory.GetCurrentDirectory());
 
-        PrintBanner(context);
+        PrintBanner(context, executor);
 
         while (true)
         {
@@ -133,7 +133,7 @@ public static class Program
         }
     }
 
-    private static void PrintBanner(ShellContext context)
+    private static void PrintBanner(ShellContext context, ShellRuntimeManager runtime)
     {
         Console.ForegroundColor = ConsoleColor.Cyan;
         Console.WriteLine(@"
@@ -152,6 +152,7 @@ public static class Program
         Console.ForegroundColor = ConsoleColor.DarkGray;
         Console.WriteLine($"Session Directory : {context.CurrentDirectory}");
         Console.WriteLine($"Elevation State   : {(context.IsElevated ? "Administrator (Elevated)" : "Standard User")}");
+        Console.WriteLine($"Execution Runtime : {(runtime.IsRunspaceActive ? "In-Process PowerShell Runspace (Persistent State)" : "Out-of-Process Fallback")}");
         Console.WriteLine("===============================================================\n");
         Console.ResetColor();
     }
