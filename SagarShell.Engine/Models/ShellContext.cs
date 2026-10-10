@@ -118,6 +118,19 @@ public class EntityMemory
     public string? LastFilterPattern { get; set; }
     public string? LastSearchTerm { get; set; }
 
+    public void Clear()
+    {
+        LastReferencedPaths.Clear();
+        LastReferencedProcessIds.Clear();
+        LastReferencedProcessNames.Clear();
+        LastReferencedPorts.Clear();
+        LastReferencedServices.Clear();
+        LastReferencedUrlOrHost = null;
+        LastReferencedBranch = null;
+        LastFilterPattern = null;
+        LastSearchTerm = null;
+    }
+
     public void UpdateFrom(TranslationResult translation, ExecutionResult? execution)
     {
         if (translation.ExtractedEntities == null) return;

@@ -15,6 +15,7 @@ public static class Program
         var engine = new NaturalLanguageEngine();
         using var executor = new ShellRuntimeManager(Directory.GetCurrentDirectory());
         var context = new ShellContext(Directory.GetCurrentDirectory());
+        var memoryManager = new SagarShell.Engine.Memory.PersistentMemoryManager(Directory.GetCurrentDirectory(), context.IsElevated);
 
         PrintBanner(context, executor);
 
@@ -37,15 +38,16 @@ public static class Program
             if (trimmed.Equals("exit", StringComparison.OrdinalIgnoreCase) ||
                 trimmed.Equals("quit", StringComparison.OrdinalIgnoreCase))
             {
+                await memoryManager.SaveActiveSessionAsync();
                 Console.ForegroundColor = ConsoleColor.Yellow;
-                Console.WriteLine("Exiting Sagar Shell. Goodbye!");
+                Console.WriteLine("Session saved. Exiting Sagar Shell. Goodbye!");
                 Console.ResetColor();
                 break;
             }
 
             if (trimmed.Equals("history", StringComparison.OrdinalIgnoreCase))
             {
-                PrintHistory(context);
+                PrintHistory(context, memoryManager);
                 continue;
             }
 
@@ -230,6 +232,8 @@ public static class Program
                 }
             }
 
+            memoryManager.RecordExecution(trimmed, translation.OriginalInput, translation, result, context);
+
             Console.ForegroundColor = ConsoleColor.DarkGray;
             Console.WriteLine($"--- Done ({result.Duration.TotalMilliseconds:F0} ms) ---");
             Console.ResetColor();
@@ -359,29 +363,33 @@ public static class Program
         Console.ResetColor();
     }
 
-    private static void PrintHistory(ShellContext context)
+    private static void PrintHistory(ShellContext context, SagarShell.Engine.Memory.PersistentMemoryManager memoryManager)
     {
         Console.ForegroundColor = ConsoleColor.Yellow;
         Console.WriteLine("\n--- Command History ---");
         Console.ResetColor();
 
-        if (context.History.Count == 0)
+        var activeCommands = memoryManager.ActiveSession.Commands;
+        if (activeCommands.Count == 0 && context.History.Count == 0)
         {
             Console.WriteLine("No commands recorded yet in this session.");
             return;
         }
 
-        for (int i = 0; i < context.History.Count; i++)
+        for (int i = 0; i < activeCommands.Count; i++)
         {
-            var h = context.History[i];
+            var h = activeCommands[i];
+            var status = h.Success ? "[✓]" : "[✗]";
             Console.ForegroundColor = ConsoleColor.DarkGray;
             Console.Write($"[{i + 1}] {h.Timestamp:HH:mm:ss} ");
+            Console.ForegroundColor = h.Success ? ConsoleColor.Green : ConsoleColor.Red;
+            Console.Write($"{status} ");
             Console.ForegroundColor = ConsoleColor.Cyan;
-            Console.Write($"\"{h.Input}\"");
+            Console.Write($"\"{h.RawInput}\"");
             Console.ForegroundColor = ConsoleColor.DarkGray;
             Console.Write(" -> ");
             Console.ForegroundColor = ConsoleColor.Green;
-            Console.WriteLine(h.Translation.PowerShellScript);
+            Console.WriteLine(h.PowerShellScript);
         }
         Console.ResetColor();
     }
