@@ -172,4 +172,30 @@ public class TranslationEngineTests
 
         Assert.Equal(3000, context.Memory.LastReferencedPorts.First());
     }
+
+    [Theory]
+    [InlineData("what can you do")]
+    [InlineData("what can you do?")]
+    [InlineData("what are your capabilities")]
+    [InlineData("capabilities")]
+    [InlineData("help")]
+    [InlineData("show commands")]
+    [InlineData("examples")]
+    public void WhatCanYouDo_ShouldReturnCapabilitiesSummary(string input)
+    {
+        var result = _engine.Translate(new TranslationRequest(input));
+
+        Assert.NotNull(result);
+        Assert.Equal(RiskLevel.Safe, result.Risk);
+        Assert.Contains("capabilities", result.Explanation, StringComparison.OrdinalIgnoreCase);
+        Assert.NotNull(result.DirectNativeAction);
+
+        var context = new ShellContext();
+        var execution = result.DirectNativeAction(context);
+        Assert.True(execution.Success);
+        Assert.Contains("SAGAR SHELL - WHAT CAN I DO?", execution.StandardOutput);
+        Assert.Contains("FILE SYSTEM", execution.StandardOutput);
+        Assert.Contains("PROCESS & PORT MANAGEMENT", execution.StandardOutput);
+        Assert.Contains("MULTI-STEP COMPOUND TASK PLANNING", execution.StandardOutput);
+    }
 }

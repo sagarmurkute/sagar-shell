@@ -33,6 +33,7 @@ public class NaturalLanguageEngine : ITranslationEngine
 
     private void RegisterDefaultPatterns()
     {
+        RegisterPattern(new HelpPatterns());
         RegisterPattern(new NavigationPatterns());
         RegisterPattern(new FileSystemPatterns());
         RegisterPattern(new ProcessPatterns());

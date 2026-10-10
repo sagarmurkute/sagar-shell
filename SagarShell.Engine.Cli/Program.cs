@@ -49,7 +49,7 @@ public static class Program
                 continue;
             }
 
-            if (trimmed.Equals("help", StringComparison.OrdinalIgnoreCase))
+            if (IsHelpOrCapabilitiesCommand(trimmed))
             {
                 PrintHelp();
                 continue;
@@ -335,39 +335,21 @@ public static class Program
         Console.ResetColor();
     }
 
+    private static bool IsHelpOrCapabilitiesCommand(string input)
+    {
+        var lower = input.ToLowerInvariant().Trim();
+        return lower is "help" or "?" or "/help" or "--help" or "-h" or "man"
+            or "what can you do" or "what can you do?" or "what can you do for me"
+            or "what can i do" or "what do you do" or "what are your capabilities"
+            or "capabilities" or "what are you capable of" or "what can this shell do"
+            or "tell me what you can do" or "commands" or "show commands"
+            or "examples" or "show examples" or "features" or "show features";
+    }
+
     private static void PrintHelp()
     {
-        Console.ForegroundColor = ConsoleColor.Yellow;
-        Console.WriteLine("\n--- Sagar Shell Engine Help & Example Phrases ---");
-        Console.ForegroundColor = ConsoleColor.White;
-        Console.WriteLine("File System:");
-        Console.WriteLine("  • list files in downloads");
-        Console.WriteLine("  • find all pdf files");
-        Console.WriteLine("  • show top 5 largest files in current folder");
-        Console.WriteLine("  • create a folder called Projects");
-        Console.WriteLine("  • create file notes.txt with content 'Hello World'");
-        Console.WriteLine("  • search for 'TODO' in all .cs files");
-        Console.WriteLine("  • read file package.json / show first 20 lines of app.log");
-        Console.WriteLine("  • zip folder src to backup.zip / empty recycle bin");
-
-        Console.WriteLine("\nProcess & Port Management:");
-        Console.WriteLine("  • show running processes / what is using the most cpu");
-        Console.WriteLine("  • show top 5 memory hogs / find process chrome");
-        Console.WriteLine("  • kill process chrome / kill pid 1234");
-        Console.WriteLine("  • what is using port 3000 / kill whatever is using port 3000");
-
-        Console.WriteLine("\nFollow-ups & Pronoun Intelligence:");
-        Console.WriteLine("  • Type 'list all pdf files', then 'sort them by size', then 'show first 3'");
-        Console.WriteLine("  • Type 'what is using port 8080', then 'kill it'");
-
-        Console.WriteLine("\nNetworking & System Info:");
-        Console.WriteLine("  • what is my ip / what is my public ip / ping google.com");
-        Console.WriteLine("  • show open ports / flush dns / show saved wifi passwords");
-        Console.WriteLine("  • show system info / free ram / cpu usage / disk space / uptime");
-
-        Console.WriteLine("\nGit & Navigation:");
-        Console.WriteLine("  • git status / commit everything with message 'update' / show last 5 commits");
-        Console.WriteLine("  • go to desktop / go back / cd .. / clear screen");
+        Console.ForegroundColor = ConsoleColor.Cyan;
+        Console.WriteLine("\n" + SagarShell.Engine.Intelligence.Patterns.HelpPatterns.BuildCapabilitiesSummary());
         Console.ResetColor();
     }
 
