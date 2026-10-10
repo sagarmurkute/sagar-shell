@@ -9,9 +9,9 @@ using SagarShell.Engine.Utilities;
 namespace SagarShell.Engine.Intelligence.Conversation;
 
 /// <summary>
-/// Master Multi-Turn Conversational Dialogue Reasoner.
+/// Master Multi-Turn Conversational Dialogue Reasoner (Pure C# / 0 external LLM dependencies).
 /// Understands user problems, goals, follow-up questions, affirmations, corrections,
-/// and context across multiple turns before executing actions.
+/// ordinals, and semantic intents across multiple turns before executing actions.
 /// </summary>
 public static class ConversationalDialogueEngine
 {
@@ -61,13 +61,21 @@ public static class ConversationalDialogueEngine
         if (context.ActiveProposal != null && (AffirmationRegex.IsMatch(raw) || AffirmationRegex.IsMatch(clean) || RejectionRegex.IsMatch(raw) || RejectionRegex.IsMatch(clean)))
             return true;
 
-        // 2. Check problem statements
+        // 2. Check corrections
+        if (ContextualCorrectionHandler.IsCorrection(input, context))
+            return true;
+
+        // 3. Check follow-ups
+        if (ContextualFollowUpHandler.CanHandle(input, context))
+            return true;
+
+        // 4. Check problem statements
         if (SystemSlowRegex.IsMatch(raw) || SystemSlowRegex.IsMatch(clean) ||
             DiskFullRegex.IsMatch(raw) || DiskFullRegex.IsMatch(clean) ||
             NetworkSlowRegex.IsMatch(raw) || NetworkSlowRegex.IsMatch(clean))
             return true;
 
-        // 3. Check contextual follow-up requests
+        // 5. Check contextual follow-up requests
         if (CloseMostCpuRegex.IsMatch(raw) || CloseMostCpuRegex.IsMatch(clean) ||
             CloseMostMemoryRegex.IsMatch(raw) || CloseMostMemoryRegex.IsMatch(clean) ||
             DeleteLargestFileRegex.IsMatch(raw) || DeleteLargestFileRegex.IsMatch(clean))
@@ -111,7 +119,23 @@ public static class ConversationalDialogueEngine
             }
         }
 
-        // 2. Problem Statement: Laptop / PC is slow
+        // 2. Handle Contextual User Corrections (e.g. "no, I meant port 5000", "not that one, kill chrome")
+        if (ContextualCorrectionHandler.IsCorrection(input, context))
+        {
+            var correctionResult = ContextualCorrectionHandler.TryHandleCorrection(input, context);
+            if (correctionResult != null)
+                return correctionResult;
+        }
+
+        // 3. Handle Contextual Follow-Ups (e.g. "close the first one", "sort by memory instead", "export that to json")
+        if (ContextualFollowUpHandler.CanHandle(input, context))
+        {
+            var followUpResult = ContextualFollowUpHandler.TryHandle(input, context);
+            if (followUpResult != null)
+                return followUpResult;
+        }
+
+        // 4. Problem Statement: Laptop / PC is slow
         if (SystemSlowRegex.IsMatch(raw) || SystemSlowRegex.IsMatch(clean))
         {
             var diagnosticScript = "Get-Process | Where-Object { $_.CPU -gt 0 } | Sort-Object CPU -Descending | Select-Object -First 10 Id, ProcessName, @{Name='CPU_Sec';Expression={[math]::Round($_.CPU,1)}}, @{Name='RAM_MB';Expression={[math]::Round($_.WorkingSet64/1MB,1)}}";
@@ -135,8 +159,8 @@ public static class ConversationalDialogueEngine
             );
         }
 
-        // 3. Problem Statement: Running out of disk space
-        if (DiskFullRegex.IsMatch(clean))
+        // 5. Problem Statement: Running out of disk space
+        if (DiskFullRegex.IsMatch(raw) || DiskFullRegex.IsMatch(clean))
         {
             var diagnosticScript = "Get-Volume | Where-Object { $_.DriveType -eq 'Fixed' } | Select-Object DriveLetter, FileSystemLabel, @{Name='Free_GB';Expression={[math]::Round($_.SizeRemaining/1GB,2)}}, @{Name='Total_GB';Expression={[math]::Round($_.Size/1GB,2)}}";
             
@@ -159,8 +183,8 @@ public static class ConversationalDialogueEngine
             );
         }
 
-        // 4. Problem Statement: Network / Internet issue
-        if (NetworkSlowRegex.IsMatch(clean))
+        // 6. Problem Statement: Network / Internet issue
+        if (NetworkSlowRegex.IsMatch(raw) || NetworkSlowRegex.IsMatch(clean))
         {
             var diagnosticScript = "Test-NetConnection -ComputerName 8.8.8.8 | Select-Object ComputerName, PingSucceeded, RoundTripTime";
             
@@ -183,8 +207,8 @@ public static class ConversationalDialogueEngine
             );
         }
 
-        // 5. Follow-Up: "Close the one using the most CPU"
-        if (CloseMostCpuRegex.IsMatch(clean))
+        // 7. Follow-Up: "Close the one using the most CPU"
+        if (CloseMostCpuRegex.IsMatch(raw) || CloseMostCpuRegex.IsMatch(clean))
         {
             var target = ContextualEntityExtractor.FindProcessWithMostCpu(context);
 
@@ -228,7 +252,6 @@ public static class ConversationalDialogueEngine
             }
             else
             {
-                // Dynamic fallback query
                 var script = "Get-Process | Where-Object { $_.CPU -gt 0 } | Sort-Object CPU -Descending | Select-Object -First 1 | Stop-Process -Force";
                 var res = TranslationResult.CreateSuccess(
                     input,
@@ -244,8 +267,8 @@ public static class ConversationalDialogueEngine
             }
         }
 
-        // 6. Follow-Up: "Close the one using the most memory"
-        if (CloseMostMemoryRegex.IsMatch(clean))
+        // 8. Follow-Up: "Close the one using the most memory"
+        if (CloseMostMemoryRegex.IsMatch(raw) || CloseMostMemoryRegex.IsMatch(clean))
         {
             var target = ContextualEntityExtractor.FindProcessWithMostMemory(context);
 
@@ -283,8 +306,8 @@ public static class ConversationalDialogueEngine
             }
         }
 
-        // 7. Follow-Up: "Delete the largest file"
-        if (DeleteLargestFileRegex.IsMatch(clean))
+        // 9. Follow-Up: "Delete the largest file"
+        if (DeleteLargestFileRegex.IsMatch(raw) || DeleteLargestFileRegex.IsMatch(clean))
         {
             var target = ContextualEntityExtractor.FindLargestFile(context);
 
@@ -304,6 +327,17 @@ public static class ConversationalDialogueEngine
                 res.ImpactExplanation = $"Permanently deletes '{target.FilePath}' ({sizeMb} MB). This file will not be moved to Recycle Bin.";
                 res.IsConversationalResponse = true;
                 return res;
+            }
+        }
+
+        // 10. Semantic Intent Parsing (Zero-LLM semantic understanding of varied natural English)
+        var parsedIntent = SemanticIntentParser.Parse(clean, context);
+        if (parsedIntent != null && parsedIntent.TargetType != SemanticIntentParser.EntityType.Unknown)
+        {
+            var semanticResult = SemanticIntentParser.GenerateTranslation(parsedIntent, input, context);
+            if (semanticResult != null)
+            {
+                return semanticResult;
             }
         }
 

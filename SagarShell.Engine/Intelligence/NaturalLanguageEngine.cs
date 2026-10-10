@@ -146,7 +146,19 @@ public class NaturalLanguageEngine : ITranslationEngine
             }
         }
 
-        // 6. Rule-based Fallback Slot Resolver
+        // 6. Semantic Intent Parser (Context-aware zero-LLM natural English parser)
+        var semanticIntent = SagarShell.Engine.Intelligence.Conversation.SemanticIntentParser.Parse(sanitized, context);
+        if (semanticIntent != null)
+        {
+            var semanticResult = SagarShell.Engine.Intelligence.Conversation.SemanticIntentParser.GenerateTranslation(semanticIntent, rawInput, context);
+            if (semanticResult != null && !string.IsNullOrWhiteSpace(semanticResult.PowerShellScript))
+            {
+                EnrichAndAnalyzeSafety(semanticResult, request);
+                return semanticResult;
+            }
+        }
+
+        // 7. Rule-based Fallback Slot Resolver
         var fallbackResult = await _fallbackProvider.TranslateAsync(sanitized, context, cancellationToken);
         if (fallbackResult != null && !string.IsNullOrWhiteSpace(fallbackResult.PowerShellScript))
         {
@@ -154,7 +166,7 @@ public class NaturalLanguageEngine : ITranslationEngine
             return fallbackResult;
         }
 
-        // 7. Unknown
+        // 8. Unknown
         return TranslationResult.CreateUnknown(rawInput, $"Unable to unambiguously resolve '{rawInput}' into a safe Windows command.");
     }
 
