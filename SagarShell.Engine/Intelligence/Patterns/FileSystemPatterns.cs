@@ -28,6 +28,11 @@ public class FileSystemPatterns : ICommandPattern
         @"^(?:find|list|show|search\s+for|get)\s+(?:all\s+)?(?:\*\.)?(?<ext>\.[a-zA-Z0-9]+|(?!files\b|the\b|all\b|hidden\b|empty\b|large\b|new\b|recent\b|any\b)[a-zA-Z0-9]+)\s+files?(?:\s+(?:in|inside|from|at)\s+(?<path>.+))?$",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
+    // Natural file search / categories: "find old videos in downloads", "list images in pictures", "find documents"
+    private static readonly Regex FindFilesRegex = new(
+        @"^(?:find|list|show|search\s+for|get|locate)\s+(?:all\s+)?(?:the\s+)?(?:old\s+|recent\s+|new\s+|large\s+|big\s+|empty\s+)?(?:videos?|movies?|images?|photos?|pictures?|audio|music|songs?|documents?|docs?|logs?|archives?|files?|items?)(?:\s+(?:in|inside|from|at)\s+(?<path>.+))?$",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
     // Grep/Search content: "search for 'TODO' in all .cs files", "find 'apikey' in current folder"
     private static readonly Regex GrepContentRegex = new(
         @"^(?:search\s+for|find\s+text|find|grep)\s+['""](?<query>[^'""]+)['""](?:\s+in\s+(?:all\s+)?(?<filter>\*\.[a-zA-Z0-9]+|[a-zA-Z0-9*.]+\s+files?))?(?:\s+in\s+(?<path>.+))?$",
@@ -92,6 +97,7 @@ public class FileSystemPatterns : ICommandPattern
         return lower is "ls" or "dir" or "list files" or "show files"
             || ListFilesRegex.IsMatch(input)
             || FindByExtensionRegex.IsMatch(input)
+            || FindFilesRegex.IsMatch(input)
             || GrepContentRegex.IsMatch(input)
             || CreateDirRegex.IsMatch(input)
             || CreateFileRegex.IsMatch(input)
@@ -446,8 +452,42 @@ public class FileSystemPatterns : ICommandPattern
             ps += " -Force";
         }
 
-        // Add size/time where-object clauses
+        // Add size/time/category where-object clauses
         var whereClauses = new System.Collections.Generic.List<string>();
+
+        // Category matching
+        string? categoryName = null;
+        if (Regex.IsMatch(input, @"\b(?:videos?|movies?)\b", RegexOptions.IgnoreCase))
+        {
+            categoryName = "videos";
+            whereClauses.Add("$_.Extension -match '\\.(mp4|mkv|avi|mov|wmv|flv|webm)$'");
+        }
+        else if (Regex.IsMatch(input, @"\b(?:images?|photos?|pictures?)\b", RegexOptions.IgnoreCase))
+        {
+            categoryName = "images";
+            whereClauses.Add("$_.Extension -match '\\.(png|jpe?g|gif|webp|bmp|svg)$'");
+        }
+        else if (Regex.IsMatch(input, @"\b(?:audio|music|songs?)\b", RegexOptions.IgnoreCase))
+        {
+            categoryName = "audio files";
+            whereClauses.Add("$_.Extension -match '\\.(mp3|wav|flac|aac|m4a|ogg)$'");
+        }
+        else if (Regex.IsMatch(input, @"\b(?:documents?|docs?)\b", RegexOptions.IgnoreCase))
+        {
+            categoryName = "documents";
+            whereClauses.Add("$_.Extension -match '\\.(pdf|docx?|xlsx?|pptx?|txt|rtf|csv)$'");
+        }
+        else if (Regex.IsMatch(input, @"\b(?:logs?|log\s+files?)\b", RegexOptions.IgnoreCase) && string.IsNullOrEmpty(filter))
+        {
+            categoryName = "log files";
+            whereClauses.Add("$_.Extension -match '\\.log$'");
+        }
+        else if (Regex.IsMatch(input, @"\b(?:archives?|zip\s+files?)\b", RegexOptions.IgnoreCase))
+        {
+            categoryName = "archives";
+            whereClauses.Add("$_.Extension -match '\\.(zip|tar|gz|rar|7z)$'");
+        }
+
         if (sizeFilter != null)
         {
             whereClauses.Add(sizeFilter.PowerShellFilter);
@@ -466,7 +506,7 @@ public class FileSystemPatterns : ICommandPattern
         var isLargest = lower.Contains("largest") || lower.Contains("biggest");
         var isSmallest = lower.Contains("smallest");
         var isNewest = lower.Contains("newest") || lower.Contains("most recent");
-        var isOldest = lower.Contains("oldest");
+        var isOldest = lower.Contains("oldest") || Regex.IsMatch(lower, @"\bold\b");
 
         if (isLargest)
         {
@@ -494,10 +534,11 @@ public class FileSystemPatterns : ICommandPattern
         // Format nice output
         ps += " | Select-Object Name, Length, LastWriteTime, Extension";
 
+        var itemDesc = categoryName ?? (filter != null ? $"'{filter}' files" : "files");
         var result = TranslationResult.CreateSuccess(
             input,
             ps,
-            $"Lists files in '{targetPath}'" + (filter != null ? $" matching '{filter}'" : "") + (sizeFilter != null ? $" with size {sizeFilter.ComparisonOperator} {sizeFilter.PowerShellUnit}" : "") + ".",
+            $"Lists {itemDesc} in '{targetPath}'" + (sizeFilter != null ? $" with size {sizeFilter.ComparisonOperator} {sizeFilter.PowerShellUnit}" : "") + ".",
             RiskLevel.Safe,
             IntentCategory.FileSystem
         );

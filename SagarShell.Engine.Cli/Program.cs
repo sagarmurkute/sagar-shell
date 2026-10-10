@@ -65,7 +65,59 @@ public static class Program
                     : trimmed["dry ".Length..].Trim();
             }
 
-            // Perform translation
+            var planner = new SagarShell.Engine.Planning.MultiStepTaskPlanner(engine);
+
+            // Check if this is a compound multi-step instruction
+            if (planner.IsCompoundInstruction(trimmed))
+            {
+                var plan = planner.CreatePlan(trimmed, context);
+                PrintPlanSummary(plan);
+
+                Console.ForegroundColor = ConsoleColor.Yellow;
+                Console.Write("\n⚡ Proceed with this multi-step execution plan? (Y/n/dry): ");
+                Console.ResetColor();
+                var planConfirm = Console.ReadLine()?.Trim().ToLowerInvariant();
+
+                if (planConfirm == "dry")
+                {
+                    Console.ForegroundColor = ConsoleColor.DarkYellow;
+                    Console.WriteLine("[Dry Run] Plan validated. No commands executed.");
+                    Console.ResetColor();
+                    continue;
+                }
+
+                if (!string.IsNullOrEmpty(planConfirm) && planConfirm != "y" && planConfirm != "yes")
+                {
+                    Console.ForegroundColor = ConsoleColor.DarkYellow;
+                    Console.WriteLine("Plan execution cancelled by user.");
+                    Console.ResetColor();
+                    continue;
+                }
+
+                Console.ForegroundColor = ConsoleColor.DarkGray;
+                Console.WriteLine("\n--- Executing Multi-Step Plan ---");
+                Console.ResetColor();
+
+                var report = await planner.ExecutePlanAsync(
+                    plan,
+                    executor,
+                    context,
+                    confirmationHandler: async step =>
+                    {
+                        Console.ForegroundColor = ConsoleColor.Red;
+                        Console.Write($"\n⚠️  Step {step.StepIndex + 1} modifies state: \"{step.Description}\"\n    Confirm this step? (Y/n): ");
+                        Console.ResetColor();
+                        var stepAns = Console.ReadLine()?.Trim().ToLowerInvariant();
+                        return string.IsNullOrEmpty(stepAns) || stepAns == "y" || stepAns == "yes";
+                    });
+
+                Console.ForegroundColor = report.Success ? ConsoleColor.Green : ConsoleColor.Red;
+                Console.WriteLine($"\n{report.GenerateSummary()}");
+                Console.ResetColor();
+                continue;
+            }
+
+            // Single step instruction translation
             var request = new TranslationRequest
             {
                 NaturalLanguageInput = trimmed,
@@ -211,6 +263,48 @@ public static class Program
             Console.WriteLine(string.Join(" | ", result.SuggestedFollowUps));
         }
 
+        Console.ResetColor();
+    }
+
+    private static void PrintPlanSummary(SagarShell.Engine.Planning.ExecutionPlan plan)
+    {
+        Console.ForegroundColor = ConsoleColor.Magenta;
+        Console.WriteLine($"\n[Multi-Step Execution Plan] {plan.TotalSteps} Steps | Overall Risk: {plan.OverallRisk}");
+        Console.ForegroundColor = ConsoleColor.DarkGray;
+        Console.WriteLine(new string('=', 65));
+
+        for (int i = 0; i < plan.Steps.Count; i++)
+        {
+            var step = plan.Steps[i];
+            var (riskColor, riskBadge) = step.Risk switch
+            {
+                RiskLevel.Safe => (ConsoleColor.Green, "[SAFE]"),
+                RiskLevel.Low => (ConsoleColor.Cyan, "[LOW]"),
+                RiskLevel.Moderate => (ConsoleColor.Yellow, "[MODERATE]"),
+                RiskLevel.High => (ConsoleColor.Magenta, "[HIGH RISK]"),
+                RiskLevel.Critical => (ConsoleColor.Red, "[CRITICAL]"),
+                _ => (ConsoleColor.White, "[UNKNOWN]")
+            };
+
+            var deps = step.DependsOnStepIndices.Count > 0
+                ? $" (Depends on Step {string.Join(", ", step.DependsOnStepIndices.Select(d => d + 1))})"
+                : "";
+
+            Console.ForegroundColor = ConsoleColor.White;
+            Console.Write($"  Step {i + 1}: ");
+            Console.ForegroundColor = riskColor;
+            Console.Write($"{riskBadge} ");
+            Console.ForegroundColor = ConsoleColor.Gray;
+            Console.WriteLine($"{step.Description}{deps}");
+
+            Console.ForegroundColor = ConsoleColor.DarkGray;
+            Console.Write("    PowerShell: ");
+            Console.ForegroundColor = ConsoleColor.Green;
+            Console.WriteLine(step.Translation.PowerShellScript);
+        }
+
+        Console.ForegroundColor = ConsoleColor.DarkGray;
+        Console.WriteLine(new string('=', 65));
         Console.ResetColor();
     }
 

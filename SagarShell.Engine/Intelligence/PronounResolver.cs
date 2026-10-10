@@ -209,7 +209,104 @@ public static class PronounResolver
             }
         }
 
-        // 6. Pronoun actions on Files / Paths (e.g. "delete it", "delete them", "remove them", "open it", "how big is it")
+        // 6. Pronoun actions on Files / Paths (e.g. "delete it", "delete them", "move them to Archive", "compress them")
+        var moveMatch = Regex.Match(lower, @"^(?:move|mv)\s+(?:them|it|those|these|the\s+files?|the\s+items?)?\s*(?:to|into)\s+['""]?(?<dest>[^'""]+)['""]?", RegexOptions.IgnoreCase);
+        if (moveMatch.Success)
+        {
+            var dest = moveMatch.Groups["dest"].Value.Trim();
+            var resDest = NaturalPathResolver.ResolvePath(dest);
+            var escDest = NaturalPathResolver.EscapeForPowerShell(resDest);
+
+            string ps;
+            if (context.Memory.LastReferencedPaths.Count > 0 && !lastTranslation.PowerShellScript.Contains("Get-ChildItem"))
+            {
+                var paths = string.Join(", ", context.Memory.LastReferencedPaths.Select(NaturalPathResolver.EscapeForPowerShell));
+                ps = $"Move-Item -Path {paths} -Destination {escDest} -Force; Write-Host \"Moved to {dest}\"";
+            }
+            else
+            {
+                ps = $"New-Item -ItemType Directory -Path {escDest} -Force -ErrorAction SilentlyContinue | Out-Null; {lastTranslation.PowerShellScript} | Move-Item -Destination {escDest} -Force; Write-Host \"Moved items to {dest}\"";
+            }
+
+            var result = TranslationResult.CreateSuccess(
+                cleanInput,
+                ps,
+                $"Moves matching/referenced items to '{dest}'.",
+                RiskLevel.High,
+                IntentCategory.FileSystem
+            );
+            result.ExtractedEntities!.Paths.Add(dest);
+            return result;
+        }
+
+        var copyMatch = Regex.Match(lower, @"^(?:copy|cp)\s+(?:them|it|those|these|the\s+files?|the\s+items?)?\s*(?:to|into)\s+['""]?(?<dest>[^'""]+)['""]?", RegexOptions.IgnoreCase);
+        if (copyMatch.Success)
+        {
+            var dest = copyMatch.Groups["dest"].Value.Trim();
+            var resDest = NaturalPathResolver.ResolvePath(dest);
+            var escDest = NaturalPathResolver.EscapeForPowerShell(resDest);
+
+            string ps;
+            if (context.Memory.LastReferencedPaths.Count > 0 && !lastTranslation.PowerShellScript.Contains("Get-ChildItem"))
+            {
+                var paths = string.Join(", ", context.Memory.LastReferencedPaths.Select(NaturalPathResolver.EscapeForPowerShell));
+                ps = $"Copy-Item -Path {paths} -Destination {escDest} -Recurse -Force; Write-Host \"Copied to {dest}\"";
+            }
+            else
+            {
+                ps = $"New-Item -ItemType Directory -Path {escDest} -Force -ErrorAction SilentlyContinue | Out-Null; {lastTranslation.PowerShellScript} | Copy-Item -Destination {escDest} -Recurse -Force; Write-Host \"Copied items to {dest}\"";
+            }
+
+            var result = TranslationResult.CreateSuccess(
+                cleanInput,
+                ps,
+                $"Copies matching/referenced items to '{dest}'.",
+                RiskLevel.Moderate,
+                IntentCategory.FileSystem
+            );
+            result.ExtractedEntities!.Paths.Add(dest);
+            return result;
+        }
+
+        var zipMatch = Regex.Match(lower, @"^(?:zip|compress|archive)\s*(?:them|it|those|these|the\s+files?|the\s+items?|the\s+folder|that)?(?:\s+(?:to|into|as)\s+['""]?(?<dest>[^'""]+)['""]?)?$", RegexOptions.IgnoreCase);
+        if (zipMatch.Success && (lower.StartsWith("zip") || lower.StartsWith("compress") || lower.StartsWith("archive")))
+        {
+            var dest = zipMatch.Groups["dest"].Value.Trim();
+            var lastPath = context.Memory.LastReferencedPaths.LastOrDefault();
+
+            if (string.IsNullOrEmpty(dest))
+            {
+                dest = !string.IsNullOrEmpty(lastPath) && lastPath != "."
+                    ? $"{System.IO.Path.GetFileName(lastPath.TrimEnd('\\', '/'))}.zip"
+                    : "Archive.zip";
+            }
+            if (!dest.EndsWith(".zip", StringComparison.OrdinalIgnoreCase)) dest += ".zip";
+
+            var resDest = NaturalPathResolver.ResolvePath(dest);
+            var escDest = NaturalPathResolver.EscapeForPowerShell(resDest);
+
+            string ps;
+            if (!string.IsNullOrEmpty(lastPath) && lastPath != "." && !lastTranslation.PowerShellScript.Contains("Get-ChildItem"))
+            {
+                var escSrc = NaturalPathResolver.EscapeForPowerShell(NaturalPathResolver.ResolvePath(lastPath));
+                ps = $"Compress-Archive -Path {escSrc} -DestinationPath {escDest} -Force; Write-Host \"Compressed {lastPath} to {dest}\"";
+            }
+            else
+            {
+                ps = $"{lastTranslation.PowerShellScript} | Compress-Archive -DestinationPath {escDest} -Force; Write-Host \"Compressed items to {dest}\"";
+            }
+
+            var result = TranslationResult.CreateSuccess(
+                cleanInput,
+                ps,
+                $"Compresses items into archive '{dest}'.",
+                RiskLevel.Moderate,
+                IntentCategory.FileSystem
+            );
+            result.ExtractedEntities!.Paths.Add(dest);
+            return result;
+        }
+
         if (lower is "delete it" or "delete them" or "remove it" or "remove them" or "delete that" or "delete those files")
         {
             if (context.Memory.LastReferencedPaths.Count > 0)
