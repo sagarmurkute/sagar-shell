@@ -1,9 +1,15 @@
 using System;
 using System.IO;
+using System.Linq;
 using System.Threading.Tasks;
+using SagarShell.Engine.Cli.Rendering;
+using SagarShell.Engine.Diagnosis;
 using SagarShell.Engine.Execution;
 using SagarShell.Engine.Intelligence;
+using SagarShell.Engine.Memory;
 using SagarShell.Engine.Models;
+using SagarShell.Engine.Planning;
+using Spectre.Console;
 
 namespace SagarShell.Engine.Cli;
 
@@ -15,19 +21,14 @@ public static class Program
         var engine = new NaturalLanguageEngine();
         using var executor = new ShellRuntimeManager(Directory.GetCurrentDirectory());
         var context = new ShellContext(Directory.GetCurrentDirectory());
-        var memoryManager = new SagarShell.Engine.Memory.PersistentMemoryManager(Directory.GetCurrentDirectory(), context.IsElevated);
+        var memoryManager = new PersistentMemoryManager(Directory.GetCurrentDirectory(), context.IsElevated);
 
-        PrintBanner(context, executor);
+        TerminalRenderer.RenderBanner(context, executor);
 
         while (true)
         {
-            Console.ForegroundColor = ConsoleColor.Cyan;
-            Console.Write($"\n[SagarShell] ");
-            Console.ForegroundColor = ConsoleColor.DarkGray;
-            Console.Write($"{ShortenPath(context.CurrentDirectory)}");
-            Console.ForegroundColor = ConsoleColor.White;
-            Console.Write(" > ");
-            Console.ResetColor();
+            var shortPath = ShortenPath(context.CurrentDirectory);
+            AnsiConsole.Markup($"\n[bold cyan]SagarShell[/] [dim]{Markup.Escape(shortPath)}[/] [bold white]>[/] ");
 
             var input = Console.ReadLine();
             if (string.IsNullOrWhiteSpace(input))
@@ -39,15 +40,13 @@ public static class Program
                 trimmed.Equals("quit", StringComparison.OrdinalIgnoreCase))
             {
                 await memoryManager.SaveActiveSessionAsync();
-                Console.ForegroundColor = ConsoleColor.Yellow;
-                Console.WriteLine("Session saved. Exiting Sagar Shell. Goodbye!");
-                Console.ResetColor();
+                AnsiConsole.MarkupLine("[bold yellow]Session saved. Exiting Sagar Shell. Goodbye![/]");
                 break;
             }
 
             if (trimmed.Equals("history", StringComparison.OrdinalIgnoreCase))
             {
-                PrintHistory(context, memoryManager);
+                TerminalRenderer.RenderHistory(context.History);
                 continue;
             }
 
@@ -67,55 +66,49 @@ public static class Program
                     : trimmed["dry ".Length..].Trim();
             }
 
-            var planner = new SagarShell.Engine.Planning.MultiStepTaskPlanner(engine);
+            var planner = new MultiStepTaskPlanner(engine);
 
             // Check if this is a compound multi-step instruction
             if (planner.IsCompoundInstruction(trimmed))
             {
                 var plan = planner.CreatePlan(trimmed, context);
-                PrintPlanSummary(plan);
+                TerminalRenderer.RenderPlanSummary(plan);
 
-                Console.ForegroundColor = ConsoleColor.Yellow;
-                Console.Write("\n⚡ Proceed with this multi-step execution plan? (Y/n/dry): ");
-                Console.ResetColor();
-                var planConfirm = Console.ReadLine()?.Trim().ToLowerInvariant();
-
-                if (planConfirm == "dry")
+                var proceed = AnsiConsole.Confirm("\n⚡ Proceed with this multi-step execution plan?", defaultValue: true);
+                if (!proceed)
                 {
-                    Console.ForegroundColor = ConsoleColor.DarkYellow;
-                    Console.WriteLine("[Dry Run] Plan validated. No commands executed.");
-                    Console.ResetColor();
+                    AnsiConsole.MarkupLine("[bold darkorange]Plan execution cancelled by user.[/]");
                     continue;
                 }
 
-                if (!string.IsNullOrEmpty(planConfirm) && planConfirm != "y" && planConfirm != "yes")
-                {
-                    Console.ForegroundColor = ConsoleColor.DarkYellow;
-                    Console.WriteLine("Plan execution cancelled by user.");
-                    Console.ResetColor();
-                    continue;
-                }
+                AnsiConsole.MarkupLine("\n[dim]─── Executing Multi-Step Plan ───[/]");
 
-                Console.ForegroundColor = ConsoleColor.DarkGray;
-                Console.WriteLine("\n--- Executing Multi-Step Plan ---");
-                Console.ResetColor();
-
-                var report = await planner.ExecutePlanAsync(
-                    plan,
-                    executor,
-                    context,
-                    confirmationHandler: async step =>
+                PlanExecutionReport report = null!;
+                await AnsiConsole.Status()
+                    .Spinner(Spinner.Known.Dots)
+                    .SpinnerStyle(Style.Parse("cyan bold"))
+                    .StartAsync("Executing plan...", async ctx =>
                     {
-                        Console.ForegroundColor = ConsoleColor.Red;
-                        Console.Write($"\n⚠️  Step {step.StepIndex + 1} modifies state: \"{step.Description}\"\n    Confirm this step? (Y/n): ");
-                        Console.ResetColor();
-                        var stepAns = Console.ReadLine()?.Trim().ToLowerInvariant();
-                        return string.IsNullOrEmpty(stepAns) || stepAns == "y" || stepAns == "yes";
+                        report = await planner.ExecutePlanAsync(
+                            plan,
+                            executor,
+                            context,
+                            confirmationHandler: async step =>
+                            {
+                                return AnsiConsole.Confirm(
+                                    $"\n⚠️ Step {step.StepIndex + 1} modifies state: \"{step.Description}\"\nConfirm this step?",
+                                    defaultValue: true);
+                            });
                     });
 
-                Console.ForegroundColor = report.Success ? ConsoleColor.Green : ConsoleColor.Red;
-                Console.WriteLine($"\n{report.GenerateSummary()}");
-                Console.ResetColor();
+                if (report.Success)
+                {
+                    AnsiConsole.MarkupLine($"\n[bold green]{Markup.Escape(report.GenerateSummary())}[/]");
+                }
+                else
+                {
+                    AnsiConsole.MarkupLine($"\n[bold red]{Markup.Escape(report.GenerateSummary())}[/]");
+                }
                 continue;
             }
 
@@ -133,25 +126,9 @@ public static class Program
             if (translation.NeedsClarification && translation.Clarification != null)
             {
                 var clar = translation.Clarification;
-                Console.ForegroundColor = ConsoleColor.Cyan;
-                Console.WriteLine($"\n🤔 {clar.Question}");
-                Console.ResetColor();
+                TerminalRenderer.RenderClarification(clar);
 
-                for (int i = 0; i < clar.Options.Count; i++)
-                {
-                    var opt = clar.Options[i];
-                    Console.ForegroundColor = ConsoleColor.Yellow;
-                    Console.Write($"  [{opt.Index}] ");
-                    Console.ForegroundColor = ConsoleColor.White;
-                    Console.Write($"{opt.Label}: ");
-                    Console.ForegroundColor = ConsoleColor.DarkGray;
-                    Console.WriteLine($"{opt.Description}");
-                    Console.ResetColor();
-                }
-
-                Console.ForegroundColor = ConsoleColor.Cyan;
-                Console.Write($"\nSelect an option [1-{clar.Options.Count}] or press Enter to cancel: ");
-                Console.ResetColor();
+                AnsiConsole.Markup($"[bold cyan]Select an option [[1-{clar.Options.Count}]] or press Enter to cancel:[/] ");
                 var choiceStr = Console.ReadLine()?.Trim();
                 if (int.TryParse(choiceStr, out int choice) && choice >= 1 && choice <= clar.Options.Count)
                 {
@@ -164,20 +141,17 @@ public static class Program
                         selectedOpt.Category
                     );
                     translation.RequiresElevation = selectedOpt.RequiresElevation;
-                    PrintTranslationSummary(translation);
+                    TerminalRenderer.RenderTranslationSummary(translation);
                 }
                 else
                 {
-                    Console.ForegroundColor = ConsoleColor.DarkYellow;
-                    Console.WriteLine("Clarification cancelled.");
-                    Console.ResetColor();
+                    AnsiConsole.MarkupLine("[bold darkorange]Clarification cancelled.[/]");
                     continue;
                 }
             }
             else
             {
-                // Display translation breakdown
-                PrintTranslationSummary(translation);
+                TerminalRenderer.RenderTranslationSummary(translation);
             }
 
             // If empty or unrecognized
@@ -189,257 +163,88 @@ public static class Program
             // Safety prompt for High / Critical risk operations
             if (translation.Risk == RiskLevel.Critical && !isDryRun)
             {
-                Console.ForegroundColor = ConsoleColor.Red;
-                Console.Write("\n⚠️  CRITICAL OPERATION: Are you sure you want to execute this? (y/N/dry): ");
-                Console.ResetColor();
-                var confirm = Console.ReadLine()?.Trim().ToLowerInvariant();
-                if (confirm == "dry")
+                var confirm = AnsiConsole.Confirm("[bold red]⚠️ CRITICAL OPERATION: Are you sure you want to execute this?[/]", defaultValue: false);
+                if (!confirm)
                 {
-                    request.EnableDryRun = true;
-                    translation = await engine.TranslateAsync(request);
-                    PrintTranslationSummary(translation);
-                }
-                else if (confirm != "y" && confirm != "yes")
-                {
-                    Console.ForegroundColor = ConsoleColor.DarkYellow;
-                    Console.WriteLine("Execution aborted by user.");
-                    Console.ResetColor();
+                    AnsiConsole.MarkupLine("[bold darkorange]Execution aborted by user.[/]");
                     continue;
                 }
             }
 
-            // Execute the operation
-            Console.ForegroundColor = ConsoleColor.DarkGray;
-            Console.WriteLine("\n--- Execution Output ---");
-            Console.ResetColor();
+            // Execute the operation with interactive spinner
+            ExecutionResult result = null!;
+            await AnsiConsole.Status()
+                .Spinner(Spinner.Known.Dots)
+                .SpinnerStyle(Style.Parse("cyan bold"))
+                .StartAsync("Executing command...", async _ =>
+                {
+                    result = await executor.ExecuteAsync(translation, context);
+                });
 
-            var result = await executor.ExecuteAsync(translation, context);
+            AnsiConsole.MarkupLine("\n[dim]─── Output ───[/]");
 
-            if (!string.IsNullOrEmpty(result.StandardOutput))
+            // If structured object pipeline result is available and non-empty, render structured table
+            if (result.HasStructuredData && result.StructuredObjects != null && result.StructuredObjects.Count > 0)
             {
-                Console.ForegroundColor = ConsoleColor.Gray;
+                TerminalRenderer.RenderStructuredPipelineResult(result.StructuredObjects);
+            }
+            else if (!string.IsNullOrEmpty(result.StandardOutput))
+            {
                 Console.WriteLine(result.StandardOutput);
-                Console.ResetColor();
             }
 
             if (!result.Success)
             {
                 if (!string.IsNullOrEmpty(result.StandardError))
                 {
-                    Console.ForegroundColor = ConsoleColor.Red;
-                    Console.WriteLine($"[Error] {result.StandardError}");
-                    Console.ResetColor();
+                    AnsiConsole.MarkupLine($"[bold red][Error][/] {Markup.Escape(result.StandardError)}");
                 }
 
                 if (result.Diagnosis != null)
                 {
-                    Console.ForegroundColor = ConsoleColor.Yellow;
-                    Console.WriteLine($"\n🔍 [Diagnosis: {result.Diagnosis.Category}]");
-                    Console.ForegroundColor = ConsoleColor.White;
-                    Console.WriteLine($"   • {result.Diagnosis.PlainEnglishSummary}");
-                    Console.ForegroundColor = ConsoleColor.Gray;
-                    Console.WriteLine($"   • Likely Cause: {result.Diagnosis.LikelyCause}");
-                    Console.ResetColor();
+                    TerminalRenderer.RenderDiagnosis(result.Diagnosis);
 
                     if (result.Diagnosis.CanBeRemediated)
                     {
-                        var fix = result.Diagnosis.SuggestedFix!;
-                        Console.ForegroundColor = ConsoleColor.Cyan;
-                        Console.WriteLine($"\n💡 Suggested Fix: {fix.Description}");
-                        if (!string.IsNullOrEmpty(fix.RemediationScript))
+                        var fixChoice = AnsiConsole.Confirm("Apply suggested auto-recovery fix and retry?", defaultValue: true);
+                        if (fixChoice)
                         {
-                            Console.ForegroundColor = ConsoleColor.DarkCyan;
-                            Console.WriteLine($"   Command: {fix.RemediationScript}");
-                        }
-                        Console.ResetColor();
+                            var recoveryManager = new RecoveryManager();
+                            RecoveryResult recovery = null!;
 
-                        Console.ForegroundColor = ConsoleColor.Yellow;
-                        Console.Write("   Apply suggested fix & retry? (y/N): ");
-                        Console.ResetColor();
-                        var fixChoice = Console.ReadLine()?.Trim().ToLowerInvariant();
+                            await AnsiConsole.Status()
+                                .Spinner(Spinner.Known.Dots)
+                                .SpinnerStyle(Style.Parse("gold1 bold"))
+                                .StartAsync("Applying remediation...", async _ =>
+                                {
+                                    recovery = await recoveryManager.ApplyRecoveryAsync(
+                                        result.Diagnosis,
+                                        executor,
+                                        context,
+                                        approvalPrompt: _ => Task.FromResult(true));
+                                });
 
-                        if (fixChoice == "y" || fixChoice == "yes")
-                        {
-                            var recoveryManager = new SagarShell.Engine.Diagnosis.RecoveryManager();
-                            var recovery = await recoveryManager.ApplyRecoveryAsync(
-                                result.Diagnosis,
-                                executor,
-                                context,
-                                approvalPrompt: _ => Task.FromResult(true));
+                            if (recovery.RetrySucceeded || recovery.RemediationSucceeded)
+                            {
+                                AnsiConsole.MarkupLine($"[bold green][Recovery][/] {Markup.Escape(recovery.SummaryMessage)}");
+                            }
+                            else
+                            {
+                                AnsiConsole.MarkupLine($"[bold red][Recovery][/] {Markup.Escape(recovery.SummaryMessage)}");
+                            }
 
-                            Console.ForegroundColor = recovery.RetrySucceeded || recovery.RemediationSucceeded ? ConsoleColor.Green : ConsoleColor.Red;
-                            Console.WriteLine($"\n[Recovery] {recovery.SummaryMessage}");
                             if (recovery.RetryOutput != null && !string.IsNullOrEmpty(recovery.RetryOutput.StandardOutput))
                             {
-                                Console.ForegroundColor = ConsoleColor.Gray;
                                 Console.WriteLine(recovery.RetryOutput.StandardOutput);
                             }
-                            Console.ResetColor();
                         }
                     }
                 }
             }
 
             memoryManager.RecordExecution(trimmed, translation.OriginalInput, translation, result, context);
-
-            Console.ForegroundColor = ConsoleColor.DarkGray;
-            Console.WriteLine($"--- Done ({result.Duration.TotalMilliseconds:F0} ms) ---");
-            Console.ResetColor();
+            AnsiConsole.MarkupLine($"[dim]─── Done ({result.Duration.TotalMilliseconds:F0} ms) ───[/]");
         }
-    }
-
-    private static void PrintBanner(ShellContext context, ShellRuntimeManager runtime)
-    {
-        Console.ForegroundColor = ConsoleColor.Cyan;
-        Console.WriteLine(@"
-   _____                         _____ _          _ _ 
-  / ____|                       / ____| |        | | |
- | (___   __ _  __ _  __ _ _ __| (___ | |__   ___| | |
-  \___ \ / _` |/ _` |/ _` | '__|\___ \| '_ \ / _ \ | |
-  ____) | (_| | (_| | (_| | |   ____) | | | |  __/ | |
- |_____/ \__,_|\__, |\__,_|_|  |_____/|_| |_|\___|_|_|
-                __/ |                                 
-               |___/     Natural Language Shell Engine");
-        Console.ForegroundColor = ConsoleColor.DarkGray;
-        Console.WriteLine("===============================================================");
-        Console.ForegroundColor = ConsoleColor.White;
-        Console.WriteLine("Type any instruction in plain English (or type 'help', 'history', 'exit').");
-        Console.ForegroundColor = ConsoleColor.DarkGray;
-        Console.WriteLine($"Session Directory : {context.CurrentDirectory}");
-        Console.WriteLine($"Elevation State   : {(context.IsElevated ? "Administrator (Elevated)" : "Standard User")}");
-        Console.WriteLine($"Execution Runtime : {(runtime.IsRunspaceActive ? "In-Process PowerShell Runspace (Persistent State)" : "Out-of-Process Fallback")}");
-        Console.WriteLine("===============================================================\n");
-        Console.ResetColor();
-    }
-
-    private static void PrintTranslationSummary(TranslationResult result)
-    {
-        Console.ForegroundColor = ConsoleColor.DarkGray;
-        Console.Write("\n[Translation] ");
-
-        // Risk badge
-        var (riskColor, riskBadge) = result.Risk switch
-        {
-            RiskLevel.Safe => (ConsoleColor.Green, "[SAFE]"),
-            RiskLevel.Low => (ConsoleColor.Cyan, "[LOW]"),
-            RiskLevel.Moderate => (ConsoleColor.Yellow, "[MODERATE]"),
-            RiskLevel.High => (ConsoleColor.Magenta, "[HIGH RISK]"),
-            RiskLevel.Critical => (ConsoleColor.Red, "[CRITICAL]"),
-            _ => (ConsoleColor.White, "[UNKNOWN]")
-        };
-
-        Console.ForegroundColor = riskColor;
-        Console.Write($"{riskBadge} ");
-
-        if (result.RequiresElevation)
-        {
-            Console.ForegroundColor = ConsoleColor.Red;
-            Console.Write("[ADMIN REQUIRED] ");
-        }
-
-        Console.ForegroundColor = ConsoleColor.White;
-        Console.WriteLine(result.Category.ToString());
-
-        Console.ForegroundColor = ConsoleColor.DarkGray;
-        Console.Write("  PowerShell  : ");
-        Console.ForegroundColor = ConsoleColor.Green;
-        Console.WriteLine(result.PowerShellScript);
-
-        Console.ForegroundColor = ConsoleColor.DarkGray;
-        Console.Write("  Explanation : ");
-        Console.ForegroundColor = ConsoleColor.Gray;
-        Console.WriteLine(result.Explanation);
-
-        if (!string.IsNullOrEmpty(result.RiskExplanation))
-        {
-            Console.ForegroundColor = ConsoleColor.DarkGray;
-            Console.Write("  Risk Note   : ");
-            Console.ForegroundColor = riskColor;
-            Console.WriteLine(result.RiskExplanation);
-        }
-
-        if (result.SuggestedFollowUps.Count > 0)
-        {
-            Console.ForegroundColor = ConsoleColor.DarkGray;
-            Console.Write("  Suggestions : ");
-            Console.ForegroundColor = ConsoleColor.DarkCyan;
-            Console.WriteLine(string.Join(" | ", result.SuggestedFollowUps));
-        }
-
-        Console.ResetColor();
-    }
-
-    private static void PrintPlanSummary(SagarShell.Engine.Planning.ExecutionPlan plan)
-    {
-        Console.ForegroundColor = ConsoleColor.Magenta;
-        Console.WriteLine($"\n[Multi-Step Execution Plan] {plan.TotalSteps} Steps | Overall Risk: {plan.OverallRisk}");
-        Console.ForegroundColor = ConsoleColor.DarkGray;
-        Console.WriteLine(new string('=', 65));
-
-        for (int i = 0; i < plan.Steps.Count; i++)
-        {
-            var step = plan.Steps[i];
-            var (riskColor, riskBadge) = step.Risk switch
-            {
-                RiskLevel.Safe => (ConsoleColor.Green, "[SAFE]"),
-                RiskLevel.Low => (ConsoleColor.Cyan, "[LOW]"),
-                RiskLevel.Moderate => (ConsoleColor.Yellow, "[MODERATE]"),
-                RiskLevel.High => (ConsoleColor.Magenta, "[HIGH RISK]"),
-                RiskLevel.Critical => (ConsoleColor.Red, "[CRITICAL]"),
-                _ => (ConsoleColor.White, "[UNKNOWN]")
-            };
-
-            var deps = step.DependsOnStepIndices.Count > 0
-                ? $" (Depends on Step {string.Join(", ", step.DependsOnStepIndices.Select(d => d + 1))})"
-                : "";
-
-            Console.ForegroundColor = ConsoleColor.White;
-            Console.Write($"  Step {i + 1}: ");
-            Console.ForegroundColor = riskColor;
-            Console.Write($"{riskBadge} ");
-            Console.ForegroundColor = ConsoleColor.Gray;
-            Console.WriteLine($"{step.Description}{deps}");
-
-            Console.ForegroundColor = ConsoleColor.DarkGray;
-            Console.Write("    PowerShell: ");
-            Console.ForegroundColor = ConsoleColor.Green;
-            Console.WriteLine(step.Translation.PowerShellScript);
-        }
-
-        Console.ForegroundColor = ConsoleColor.DarkGray;
-        Console.WriteLine(new string('=', 65));
-        Console.ResetColor();
-    }
-
-    private static void PrintHistory(ShellContext context, SagarShell.Engine.Memory.PersistentMemoryManager memoryManager)
-    {
-        Console.ForegroundColor = ConsoleColor.Yellow;
-        Console.WriteLine("\n--- Command History ---");
-        Console.ResetColor();
-
-        var activeCommands = memoryManager.ActiveSession.Commands;
-        if (activeCommands.Count == 0 && context.History.Count == 0)
-        {
-            Console.WriteLine("No commands recorded yet in this session.");
-            return;
-        }
-
-        for (int i = 0; i < activeCommands.Count; i++)
-        {
-            var h = activeCommands[i];
-            var status = h.Success ? "[✓]" : "[✗]";
-            Console.ForegroundColor = ConsoleColor.DarkGray;
-            Console.Write($"[{i + 1}] {h.Timestamp:HH:mm:ss} ");
-            Console.ForegroundColor = h.Success ? ConsoleColor.Green : ConsoleColor.Red;
-            Console.Write($"{status} ");
-            Console.ForegroundColor = ConsoleColor.Cyan;
-            Console.Write($"\"{h.RawInput}\"");
-            Console.ForegroundColor = ConsoleColor.DarkGray;
-            Console.Write(" -> ");
-            Console.ForegroundColor = ConsoleColor.Green;
-            Console.WriteLine(h.PowerShellScript);
-        }
-        Console.ResetColor();
     }
 
     private static bool IsHelpOrCapabilitiesCommand(string input)
@@ -455,9 +260,7 @@ public static class Program
 
     private static void PrintHelp()
     {
-        Console.ForegroundColor = ConsoleColor.Cyan;
-        Console.WriteLine("\n" + SagarShell.Engine.Intelligence.Patterns.HelpPatterns.BuildCapabilitiesSummary());
-        Console.ResetColor();
+        AnsiConsole.MarkupLine("\n" + SagarShell.Engine.Intelligence.Patterns.HelpPatterns.BuildCapabilitiesSummary());
     }
 
     private static string ShortenPath(string path)
