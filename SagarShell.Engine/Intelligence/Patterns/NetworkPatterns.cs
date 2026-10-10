@@ -164,7 +164,7 @@ public class NetworkPatterns : ICommandPattern
         {
             return TranslationResult.CreateSuccess(
                 input,
-                "Get-NetTCPConnection -State Listen | Select-Object LocalAddress, LocalPort, OwningProcess, @{{Name='ProcessName'; Expression={{(Get-Process -Id $_.OwningProcess -ErrorAction SilentlyContinue).ProcessName}}}} | Sort-Object LocalPort",
+                "Get-NetTCPConnection -State Listen | Select-Object LocalAddress, LocalPort, OwningProcess, @{Name='ProcessName'; Expression={(Get-Process -Id $_.OwningProcess -ErrorAction SilentlyContinue).ProcessName}} | Sort-Object LocalPort",
                 "Lists all currently listening TCP network ports and associated process owners.",
                 RiskLevel.Safe,
                 IntentCategory.Network

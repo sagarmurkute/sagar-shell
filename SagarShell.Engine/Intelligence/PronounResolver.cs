@@ -2,12 +2,14 @@ using System;
 using System.Linq;
 using System.Text.RegularExpressions;
 using SagarShell.Engine.Models;
+using SagarShell.Engine.Pipeline;
 using SagarShell.Engine.Utilities;
 
 namespace SagarShell.Engine.Intelligence;
 
 /// <summary>
-/// Resolves anaphoric references, pronouns ("it", "them", "that", "the previous one"), and pipeline continuations from ShellContext.
+/// Resolves anaphoric references, pronouns ("it", "them", "that", "the previous one"),
+/// in-memory structured object pipelines, and follow-up continuations from ShellContext.
 /// </summary>
 public static class PronounResolver
 {
@@ -16,12 +18,23 @@ public static class PronounResolver
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private static readonly Regex PipelineContinuationRegex = new(
-        @"^(?:sort\s+(?:them\s+|it\s+)?by|filter\s+(?:them\s+|it\s+)?by|show\s+(?:only\s+)?(?:the\s+)?(?:first|top|last)|count\s+(?:them|it)?|select\s+)(?<rest>.*)$",
+        @"^(?:sort\s+(?:them\s+|it\s+)?by|filter\s+(?:them\s+|it\s+)?by|show\s+(?:only\s+)?(?:the\s+)?(?:first|top|last)|count\s+(?:them|it)?|select\s+|export\s+(?:them\s+|it\s+|that\s+)?to\s+|convert\s+to\s+|inspect\s+)(?<rest>.*)$",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    private static readonly Regex ExportRegex = new(
+        @"^(?:export|convert|save)\s+(?:them\s+|it\s+|that\s+|the\s+results?\s+)?(?:to|as)\s+(?<format>json|csv|xml|table)",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    private static readonly Regex InspectRegex = new(
+        @"(?:inspect|show\s+details\s+of|examine)\s+(?:the\s+)?(?:first|second|third|\d+(?:st|nd|rd|th)?|last)?\s*(?:item|one|object|result)?",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     public static bool ContainsPronounOrContinuation(string input)
     {
-        return PronounRegex.IsMatch(input) || PipelineContinuationRegex.IsMatch(input);
+        return PronounRegex.IsMatch(input)
+            || PipelineContinuationRegex.IsMatch(input)
+            || ExportRegex.IsMatch(input)
+            || InspectRegex.IsMatch(input);
     }
 
     public static TranslationResult? TryResolveFollowUp(string cleanInput, ShellContext context)
@@ -33,7 +46,85 @@ public static class PronounResolver
         var lastTranslation = lastEntry.Translation;
         var lower = cleanInput.ToLowerInvariant().Trim();
 
-        // 1. Pipeline Continuations (e.g. "sort by size", "sort them by date descending", "show top 5", "count them")
+        // 1. In-Memory Structured Object Pipeline Exports (JSON / CSV / Table)
+        var exportMatch = ExportRegex.Match(lower);
+        if (exportMatch.Success)
+        {
+            var format = exportMatch.Groups["format"].Value.ToLowerInvariant();
+            if (format == "json")
+            {
+                var res = TranslationResult.CreateSuccess(
+                    cleanInput,
+                    $"{lastTranslation.PowerShellScript} | ConvertTo-Json -Depth 5",
+                    "Exports structured result pipeline to JSON format.",
+                    RiskLevel.Safe,
+                    lastTranslation.Category
+                );
+                res.DirectNativeAction = ctx =>
+                {
+                    if (ctx.LastOutputObjects.Count > 0)
+                    {
+                        var json = StructuredObjectPipeline.ExportToJson(ctx.LastOutputObjects);
+                        return ExecutionResult.CreateSuccess(json, TimeSpan.Zero, ctx.CurrentDirectory);
+                    }
+                    return ExecutionResult.CreateFailure("No in-memory structured objects found from previous command.", 1, TimeSpan.Zero);
+                };
+                return res;
+            }
+
+            if (format == "csv")
+            {
+                var res = TranslationResult.CreateSuccess(
+                    cleanInput,
+                    $"{lastTranslation.PowerShellScript} | ConvertTo-Csv -NoTypeInformation",
+                    "Exports structured result pipeline to CSV format.",
+                    RiskLevel.Safe,
+                    lastTranslation.Category
+                );
+                res.DirectNativeAction = ctx =>
+                {
+                    if (ctx.LastOutputObjects.Count > 0)
+                    {
+                        var csv = StructuredObjectPipeline.ExportToCsv(ctx.LastOutputObjects);
+                        return ExecutionResult.CreateSuccess(csv, TimeSpan.Zero, ctx.CurrentDirectory);
+                    }
+                    return ExecutionResult.CreateFailure("No in-memory structured objects found from previous command.", 1, TimeSpan.Zero);
+                };
+                return res;
+            }
+        }
+
+        // 2. In-Memory Object Inspection
+        if (InspectRegex.IsMatch(lower))
+        {
+            int index = 0;
+            if (lower.Contains("second") || lower.Contains(" 2")) index = 1;
+            else if (lower.Contains("third") || lower.Contains(" 3")) index = 2;
+            else if (lower.Contains("last")) index = Math.Max(0, context.LastOutputObjects.Count - 1);
+
+            var res = TranslationResult.CreateSuccess(
+                cleanInput,
+                $"({lastTranslation.PowerShellScript})[{index}] | Format-List *",
+                $"Inspects all detailed properties and methods of item #{index + 1}.",
+                RiskLevel.Safe,
+                lastTranslation.Category
+            );
+
+            res.DirectNativeAction = ctx =>
+            {
+                if (ctx.LastOutputObjects.Count > index)
+                {
+                    var targetObj = ctx.LastOutputObjects[index];
+                    var report = StructuredObjectPipeline.Inspect(targetObj);
+                    return ExecutionResult.CreateSuccess(report.ToString(), TimeSpan.Zero, ctx.CurrentDirectory);
+                }
+                return ExecutionResult.CreateFailure($"Item at index {index} not found in in-memory object cache.", 1, TimeSpan.Zero);
+            };
+
+            return res;
+        }
+
+        // 3. Pipeline Continuations (e.g. "sort by size", "sort them by date descending", "show top 5", "count them")
         if (lastTranslation.Category == IntentCategory.FileSystem || lastTranslation.Category == IntentCategory.ProcessManagement || lastTranslation.Category == IntentCategory.WindowsServices)
         {
             if (lower.StartsWith("sort by size") || lower.StartsWith("sort them by size") || lower.StartsWith("order by size"))
@@ -57,6 +148,15 @@ public static class PronounResolver
                 return TranslationResult.CreateSuccess(cleanInput, ps, "Sorted previous items by name.", RiskLevel.Safe, lastTranslation.Category);
             }
 
+            // Select columns: "select Name, Id", "show only columns Name, CPU"
+            var selectMatch = Regex.Match(lower, @"^(?:select|show\s+(?:only\s+)?columns?|project)\s+(?<cols>.+)$", RegexOptions.IgnoreCase);
+            if (selectMatch.Success)
+            {
+                var cols = selectMatch.Groups["cols"].Value.Trim();
+                var ps = $"{lastTranslation.PowerShellScript} | Select-Object {cols}";
+                return TranslationResult.CreateSuccess(cleanInput, ps, $"Projects columns ({cols}) from previous query.", RiskLevel.Safe, lastTranslation.Category);
+            }
+
             // Top N filter: "show only top 5", "show first 10", "take 5"
             var topMatch = Regex.Match(lower, @"^(?:show\s+(?:only\s+)?|take\s+|select\s+)?(?:top|first)\s+(?<count>\d+)", RegexOptions.IgnoreCase);
             if (topMatch.Success)
@@ -73,7 +173,7 @@ public static class PronounResolver
             }
         }
 
-        // 2. Pronoun actions on Process (e.g. "kill it", "stop it", "terminate it")
+        // 4. Pronoun actions on Process (e.g. "kill it", "stop it", "terminate it")
         if (lower is "kill it" or "stop it" or "terminate it" or "kill them" or "end it" or "kill that process")
         {
             if (context.Memory.LastReferencedProcessIds.Count > 0)
@@ -98,7 +198,7 @@ public static class PronounResolver
             }
         }
 
-        // 3. Pronoun actions on Service (e.g. "restart it", "start it")
+        // 5. Pronoun actions on Service (e.g. "restart it", "start it")
         if (lower is "restart it" or "restart that service")
         {
             if (context.Memory.LastReferencedServices.Count > 0)
@@ -109,7 +209,7 @@ public static class PronounResolver
             }
         }
 
-        // 4. Pronoun actions on Files / Paths (e.g. "delete it", "delete them", "remove them", "open it", "how big is it")
+        // 6. Pronoun actions on Files / Paths (e.g. "delete it", "delete them", "remove them", "open it", "how big is it")
         if (lower is "delete it" or "delete them" or "remove it" or "remove them" or "delete that" or "delete those files")
         {
             if (context.Memory.LastReferencedPaths.Count > 0)

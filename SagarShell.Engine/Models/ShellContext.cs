@@ -67,6 +67,11 @@ public class ShellContext
         return false;
     }
 
+    /// <summary>
+    /// Preserved native PSObjects from the most recent command execution for in-memory filtering, sorting, and export.
+    /// </summary>
+    public List<System.Management.Automation.PSObject> LastOutputObjects { get; set; } = new();
+
     public void AddHistory(string rawInput, TranslationResult translation, ExecutionResult? execution = null)
     {
         History.Add(new CommandHistoryEntry
@@ -79,6 +84,14 @@ public class ShellContext
 
         // Update memory
         Memory.UpdateFrom(translation, execution);
+
+        // Update structured object pipeline cache
+        if (execution?.StructuredObjects != null && execution.StructuredObjects.Count > 0)
+        {
+            LastOutputObjects = execution.StructuredObjects
+                .OfType<System.Management.Automation.PSObject>()
+                .ToList();
+        }
     }
 }
 

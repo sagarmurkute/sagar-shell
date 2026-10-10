@@ -217,7 +217,7 @@ public class ProcessPatterns : ICommandPattern
         // 8. General process list
         return TranslationResult.CreateSuccess(
             input,
-            "Get-Process | Select-Object -First 30 Id, ProcessName, @{{Name='MemoryMB'; Expression={{[math]::Round($_.WorkingSet64 / 1MB, 2)}}}}, CPU | Sort-Object ProcessName",
+            "Get-Process | Select-Object -First 30 Id, ProcessName, @{Name='MemoryMB'; Expression={[math]::Round($_.WorkingSet64 / 1MB, 2)}}, CPU | Sort-Object ProcessName",
             "Lists all active running processes.",
             RiskLevel.Safe,
             IntentCategory.ProcessManagement
